@@ -1,12 +1,13 @@
 // lib/services/auth_service.dart
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:mafia_app/models/user.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/auth_response.dart';
 
 class AuthService {
-  static const String _baseUrl = 'http://10.0.3.2:8000/api/auth/';
+  static const String _baseUrl = 'http://10.0.2.2:8000/api/auth/';
 
   Future<AuthResponse> register(String username, String email, String password, String rePassword) async {
     final response = await http.post(
@@ -48,11 +49,20 @@ class AuthService {
       final String accessToken = responseData['access'];
       final String refreshToken = responseData['refresh'];
 
-      // ذخیره توکن‌ها
+      // ذخیره توکن‌ها - حتماً await کنید
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('access_token', accessToken);
       await prefs.setString('refresh_token', refreshToken);
 
+      if (kDebugMode) {
+        print('Tokens saved successfully!');
+      }
+      if (kDebugMode) {
+        print('Access Token: $accessToken');
+      }
+      if (kDebugMode) {
+        print('Refresh Token: $refreshToken');
+      }
       // گرفتن اطلاعات کاربر
       final userResponse = await http.get(
         Uri.parse('${_baseUrl}users/me/'),

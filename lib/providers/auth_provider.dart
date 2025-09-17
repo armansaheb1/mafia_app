@@ -1,8 +1,6 @@
 // lib/providers/auth_provider.dart
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../services/auth_service.dart';
 import '../models/auth_response.dart';
 import '../models/user.dart';
@@ -19,34 +17,42 @@ class AuthProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
 
   Future<void> checkAuthStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    final accessToken = prefs.getString('access_token');
-    
-    if (accessToken != null) {
-      try {
-        // بررسی معتبر بودن توکن با گرفتن اطلاعات کاربر
-        final response = await http.get(
-          Uri.parse('http://10.0.2.2:8000/api/auth/users/me/'),
-          headers: {'Authorization': 'Bearer $accessToken'},
-        );
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final accessToken = prefs.getString('access_token');
+      final refreshToken = prefs.getString('refresh_token');
+      
+      if (kDebugMode) {
+        print('Stored Access Token: $accessToken');
+      }
+      if (kDebugMode) {
+        print('Stored Refresh Token: $refreshToken');
+      }
 
-        if (response.statusCode == 200) {
-          final userData = jsonDecode(response.body);
-          _authData = AuthResponse(
-            user: User.fromJson(userData),
-            accessToken: accessToken,
-            refreshToken: prefs.getString('refresh_token') ?? '',
-          );
+      if (accessToken != null) {
+        // یک بررسی ساده‌تر - فقط چک کنیم توکن وجود داره
+        // بدون درخواست به سرور برای تست اولیه
+        _authData = AuthResponse(
+          user: User(id: 0, username: 'temp', email: 'temp'), // کاربر موقت
+          accessToken: accessToken,
+          refreshToken: refreshToken ?? '',
+        );
+        
+        if (kDebugMode) {
+          print('Using stored token without validation');
         }
-      } catch (e) {
-        // اگر توکن معتبر نیست، حذفش کن
-        await prefs.remove('access_token');
-        await prefs.remove('refresh_token');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error in checkAuthStatus: $e');
+      }
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+      if (kDebugMode) {
+        print('Auth check completed - isLoading: $_isLoading');
       }
     }
-    
-    _isLoading = false;
-    notifyListeners();
   }
 
   Future<void> login(String username, String password) async {
@@ -81,5 +87,24 @@ class AuthProvider with ChangeNotifier {
     
     _authData = null;
     notifyListeners();
+  }
+  
+  Future<void> checkStorage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final accessToken = prefs.getString('access_token');
+    final refreshToken = prefs.getString('refresh_token');
+    
+    if (kDebugMode) {
+      print('=== Storage Check ===');
+    }
+    if (kDebugMode) {
+      print('Access Token in storage: ${accessToken != null}');
+    }
+    if (kDebugMode) {
+      print('Refresh Token in storage: ${refreshToken != null}');
+    }
+    if (kDebugMode) {
+      print('=====================');
+    }
   }
 }

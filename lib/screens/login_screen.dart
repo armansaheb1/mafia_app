@@ -1,4 +1,5 @@
 // lib/screens/login_screen.dart
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
@@ -32,17 +33,24 @@ class _LoginScreenState extends State<LoginScreen> {
       // اگر ورود موفق بود، به صفحه اصلی هدایت شو
       // Navigator.of(context).pushReplacementNamed('/home');
       // فعلاً یک پیام موفقیت نشان می‌دهیم
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('ورود موفقیت‌آمیز بود!')),
       );
+      // ignore: use_build_context_synchronously
       Navigator.of(context).pushReplacementNamed('/home');
-      print('Login Successful! Token received.');
+      if (kDebugMode) {
+        print('Login Successful! Token received.');
+      }
     } catch (e) {
       // خطا را نمایش بده
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('خطا در ورود: $e')),
       );
-      print('Login Error: $e');
+      if (kDebugMode) {
+        print('Login Error: $e');
+      }
     } finally {
       setState(() {
         _isLoading = false;

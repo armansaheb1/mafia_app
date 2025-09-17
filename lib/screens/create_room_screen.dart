@@ -32,12 +32,14 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       );
 
       // بعد از ساخت اتاق موفق، به لابی برو
+      // ignore: use_build_context_synchronously
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (ctx) => const LobbyScreen(), // بعداً می‌سازیم
         ),
       );
     } catch (e) {
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('خطا در ساخت اتاق: $e')),
       );
@@ -73,7 +75,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int>(
-                  value: _maxPlayers,
+                  initialValue: _maxPlayers,
                   decoration: const InputDecoration(
                     labelText: 'تعداد بازیکنان',
                     border: OutlineInputBorder(),

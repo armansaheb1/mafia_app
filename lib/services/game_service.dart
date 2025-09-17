@@ -1,15 +1,13 @@
-// lib/services/game_service.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:mafia_app/services/api_interceptor.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/room.dart';
 import '../models/player.dart';
 
 class GameService {
-  static const String _baseUrl = 'http://10.0.3.2:8000/api/game/';
+  static const String _baseUrl = 'http://10.0.2.2:8000/api/game/';
 
- Future<String?> _getToken() async {
+  Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('access_token');
   }
@@ -20,6 +18,29 @@ class GameService {
       'Content-Type': 'application/json; charset=UTF-8',
       if (token != null) 'Authorization': 'Bearer $token',
     };
+  }
+
+  Future<Map<String, dynamic>?> checkGameStatus() async {
+    final headers = await _getHeaders();
+    
+    try {
+      final response = await http.get(
+        Uri.parse('${_baseUrl}game/status/'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 404) {
+        // بازی فعالی وجود ندارد
+        return null;
+      } else {
+        throw Exception('Failed to check game status: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error checking game status: $e');
+      return null;
+    }
   }
 
   Future<List<Room>> getRooms() async {
@@ -46,7 +67,6 @@ class GameService {
     }
   }
 
-  // ساخت اتاق جدید
   Future<Room> createRoom(String name, int maxPlayers, bool isPrivate, [String password = '']) async {
     final headers = await _getHeaders();
     final response = await http.post(
@@ -67,7 +87,6 @@ class GameService {
     }
   }
 
-  // پیوستن به اتاق
   Future<Map<String, dynamic>> joinRoom(String roomName, [String password = '']) async {
     final headers = await _getHeaders();
     final response = await http.post(
@@ -90,7 +109,6 @@ class GameService {
     }
   }
 
-  // دریافت اطلاعات لابی
   Future<Map<String, dynamic>> getLobby(int roomId) async {
     final headers = await _getHeaders();
     final response = await http.get(
@@ -108,6 +126,26 @@ class GameService {
       };
     } else {
       throw Exception('Failed to get lobby: ${response.statusCode}');
+    }
+  }
+
+  Future<void> leaveRoom(int roomId) async {
+    final headers = await _getHeaders();
+    
+    print('Leaving room with ID: $roomId');
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}rooms/leave/'),
+      headers: headers,
+      body: json.encode({'room_id': roomId}),
+    );
+
+    print('Leave room response: ${response.statusCode} - ${response.body}');
+    
+    if (response.statusCode == 200) {
+      print('Successfully left room');
+    } else {
+      throw Exception('Failed to leave room: ${response.statusCode} - ${response.body}');
     }
   }
 }

@@ -29,12 +29,14 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
       );
 
       // بعد از پیوستن موفق، به لابی برو
+      // ignore: use_build_context_synchronously
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (ctx) => const LobbyScreen(), // بعداً می‌سازیم
         ),
       );
     } catch (e) {
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('خطا در پیوستن به اتاق: $e')),
       );

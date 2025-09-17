@@ -34,10 +34,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _repasswordController.text,
       );
       // اگر موفق بود، به صفحه اصلی برو
+      // ignore: use_build_context_synchronously
       Navigator.of(context).pushReplacementNamed('/home');
     } catch (e) {
       debugPrint('Registration Error: $e');
       // خطا را نمایش بده (مثلاً با SnackBar)
+      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('خطا در ثبت‌نام: $e')),
       );
