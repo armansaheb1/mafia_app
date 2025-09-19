@@ -1,12 +1,17 @@
+import 'scenario.dart';
+
 class Player {
   final int id;
   final int userId;
   final String username;
   final int roomId;
-  final String? role;
+  final Role? role;
   bool isAlive;
   bool isReady;
   final DateTime joinedAt;
+  final int votesReceived;
+  final bool isProtected;
+  final Map<String, dynamic> specialActionsUsed;
 
   Player({
     required this.id,
@@ -17,6 +22,9 @@ class Player {
     required this.isAlive,
     required this.isReady,
     required this.joinedAt,
+    required this.votesReceived,
+    required this.isProtected,
+    required this.specialActionsUsed,
   });
 
   factory Player.fromJson(Map<String, dynamic> json) {
@@ -25,10 +33,13 @@ class Player {
       userId: json['user'],
       username: json['username'],
       roomId: json['room'],
-      role: json['role'],
+      role: json['role'] != null ? Role.fromJson(json['role']) : null,
       isAlive: json['is_alive'],
       isReady: json['is_ready'],
       joinedAt: DateTime.parse(json['joined_at']),
+      votesReceived: json['votes_received'] ?? 0,
+      isProtected: json['is_protected'] ?? false,
+      specialActionsUsed: Map<String, dynamic>.from(json['special_actions_used'] ?? {}),
     );
   }
 
@@ -39,10 +50,13 @@ class Player {
       'user': userId,
       'username': username,
       'room': roomId,
-      'role': role,
+      'role': role?.toJson(),
       'is_alive': isAlive,
       'is_ready': isReady,
       'joined_at': joinedAt.toIso8601String(),
+      'votes_received': votesReceived,
+      'is_protected': isProtected,
+      'special_actions_used': specialActionsUsed,
     };
   }
 
@@ -51,10 +65,13 @@ class Player {
     int? userId,
     String? username,
     int? roomId,
-    String? role,
+    Role? role,
     bool? isAlive,
     bool? isReady,
     DateTime? joinedAt,
+    int? votesReceived,
+    bool? isProtected,
+    Map<String, dynamic>? specialActionsUsed,
   }) {
     return Player(
       id: id ?? this.id,
@@ -65,6 +82,9 @@ class Player {
       isAlive: isAlive ?? this.isAlive,
       isReady: isReady ?? this.isReady,
       joinedAt: joinedAt ?? this.joinedAt,
+      votesReceived: votesReceived ?? this.votesReceived,
+      isProtected: isProtected ?? this.isProtected,
+      specialActionsUsed: specialActionsUsed ?? this.specialActionsUsed,
     );
   }
 }

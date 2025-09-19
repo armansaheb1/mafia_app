@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:convert';
+import 'dart:async';
 import '../providers/game_provider.dart';
 import '../providers/auth_provider.dart';
-import 'game_screen.dart';
+import '../services/websocket_service.dart';
 
 class LobbyScreen extends StatefulWidget {
   const LobbyScreen({super.key});
@@ -14,17 +16,15 @@ class LobbyScreen extends StatefulWidget {
 class _LobbyScreenState extends State<LobbyScreen> {
   final _chatController = TextEditingController();
   final _scrollController = ScrollController();
+  final WebSocketService _webSocketService = WebSocketService();
+  
   bool _isReady = false;
   bool _isDisposed = false;
-  GameProvider? _gameProvider;
-  AuthProvider? _authProvider;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _gameProvider = Provider.of<GameProvider>(context, listen: false);
-    _authProvider = Provider.of<AuthProvider>(context, listen: false);
-  }
+  bool _isWebSocketConnected = false;
+  String? _connectionError;
+  List<Map<String, dynamic>> _players = [];
+  List<Map<String, String>> _chatMessages = [];
+  StreamSubscription? _webSocketSubscription;
 
   @override
   void initState() {
@@ -32,76 +32,257 @@ class _LobbyScreenState extends State<LobbyScreen> {
     _setupWebSocket();
   }
 
-  void _setupWebSocket() {
-    final room = _gameProvider?.currentRoom;
+  Future<void> _setupWebSocket() async {
+    final gameProvider = Provider.of<GameProvider>(context, listen: false);
+    final room = gameProvider.currentRoom;
     
-    if (room != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        try {
-          await _gameProvider?.connectToWebSocket(room.name);
-          _gameProvider?.addListener(_onGameStateChanged);
-        } catch (e) {
-          if (mounted && !_isDisposed) {
-            _showSnackBar('خطا در اتصال: $e');
-          }
+    if (room == null) {
+      _showError('اتاقی یافت نشد');
+      return;
+    }
+
+    try {
+      print('🔌 Connecting to WebSocket for room: ${room.name}');
+      
+      // Cancel any existing subscription
+      await _webSocketSubscription?.cancel();
+      _webSocketSubscription = null;
+      
+      await _webSocketService.connectToRoom(room.name);
+      
+      if (_webSocketService.isConnected) {
+        if (mounted) {
+          setState(() {
+            _isWebSocketConnected = true;
+            _connectionError = null;
+          });
         }
-      });
+        
+        // گوش دادن به پیام‌های WebSocket
+        _webSocketSubscription = _webSocketService.messages.listen(
+          _handleWebSocketMessage,
+          onError: (error) {
+            print('❌ WebSocket stream error: $error');
+            if (mounted && !_isDisposed) {
+              setState(() {
+                _isWebSocketConnected = false;
+                _connectionError = 'خطا در اتصال: $error';
+              });
+            }
+          },
+          onDone: () {
+            print('🔌 WebSocket connection closed');
+            if (mounted && !_isDisposed) {
+              setState(() {
+                _isWebSocketConnected = false;
+                _connectionError = 'اتصال قطع شد';
+              });
+            }
+          },
+        );
+        
+        print('✅ WebSocket connected successfully');
+      } else {
+        throw Exception('WebSocket connection failed');
+      }
+      
+    } catch (e) {
+      print('❌ WebSocket connection failed: $e');
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isWebSocketConnected = false;
+          _connectionError = 'خطا در اتصال: $e';
+        });
+      }
     }
   }
 
-  void _onGameStateChanged() {
-  if (mounted && !_isDisposed) {
-    setState(() {});
+  void _handleWebSocketMessage(dynamic message) {
+    try {
+      print('📨 Received WebSocket message: $message');
+      
+      final data = jsonDecode(message);
+      final type = data['type'];
+      
+      switch (type) {
+        case 'lobby_state':
+          _handleLobbyState(data);
+          break;
+          
+        case 'lobby_update':
+          _handleLobbyUpdate(data);
+          break;
+          
+        case 'player_ready':
+          _handlePlayerReady(data);
+          break;
+          
+        case 'chat_message':
+          _handleChatMessage(data);
+          break;
+          
+        case 'connection_established':
+          print('✅ Connection established message received');
+          if (mounted) {
+            setState(() {
+              _isWebSocketConnected = true;
+              _connectionError = null;
+            });
+          }
+          break;
+          
+        case 'game_started':
+          _handleGameStarted(data);
+          break;
+          
+        default:
+          print('⚠️ Unknown message type: $type');
+      }
+      
+    } catch (e) {
+      print('❌ Error handling WebSocket message: $e');
+    }
+  }
+
+  void _handleLobbyState(Map<String, dynamic> data) {
+    print('📋 Handling lobby_state: $data');
+    if (mounted) {
+      setState(() {
+        _players = List<Map<String, dynamic>>.from(data['players'] ?? []);
+      });
+    }
+    print('✅ Updated players list: ${_players.length} players');
+  }
+
+  void _handleLobbyUpdate(Map<String, dynamic> data) {
+    print('📋 Handling lobby_update: $data');
+    if (mounted) {
+      setState(() {
+        _players = List<Map<String, dynamic>>.from(data['players'] ?? []);
+      });
+    }
+    
+    if (data.containsKey('message')) {
+      _addChatMessage('سیستم', data['message']);
+    }
+    print('✅ Updated players list: ${_players.length} players');
+  }
+
+  void _handlePlayerReady(Map<String, dynamic> data) {
+    final username = data['username'];
+    final isReady = data['is_ready'];
+    
+    if (mounted) {
+      setState(() {
+        final playerIndex = _players.indexWhere((p) => p['username'] == username);
+        if (playerIndex != -1) {
+          _players[playerIndex]['is_ready'] = isReady;
+        }
+      });
+    }
+    
+    _addChatMessage('سیستم', '$username ${isReady ? 'آماده' : 'آماده نیست'} شد');
+  }
+
+  void _handleChatMessage(Map<String, dynamic> data) {
+    final username = data['username'];
+    final message = data['message'];
+    _addChatMessage(username, message);
+  }
+
+  void _addChatMessage(String username, String message) {
+    if (mounted) {
+      setState(() {
+        _chatMessages.add({
+          'username': username,
+          'message': message,
+          'timestamp': DateTime.now().toString(),
+        });
+      });
+    }
     _scrollChatToBottom();
   }
-}
 
+  void _handleGameStarted(Map<String, dynamic> data) {
+    final message = data['message'] as String;
+    _addChatMessage('سیستم', message);
+    
+    // Navigate to game screen after a short delay
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/game');
+      }
+    });
+  }
 
   void _scrollChatToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
   void _sendChatMessage() {
     if (_chatController.text.trim().isEmpty) return;
     
-    _gameProvider?.sendChatMessage(_chatController.text.trim());
-    _chatController.clear();
-    _scrollChatToBottom();
+    if (_isWebSocketConnected) {
+      _webSocketService.sendMessage('chat_message', _chatController.text.trim());
+      _addChatMessage('شما', _chatController.text.trim());
+      _chatController.clear();
+    } else {
+      _showError('اتصال برقرار نیست');
+    }
   }
 
   void _toggleReady() {
-    if (_isDisposed) return;
+    if (_isDisposed || !_isWebSocketConnected) return;
     
-    setState(() {
-      _isReady = !_isReady;
-    });
-    _gameProvider?.sendReadyStatus();
-  }
-
-  void _startGame() {
-    _gameProvider?.startGame();
+    if (mounted) {
+      setState(() {
+        _isReady = !_isReady;
+      });
+    }
     
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted && !_isDisposed) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (ctx) => const GameScreen()),
-        );
-      }
-    });
+    _webSocketService.sendMessage('player_ready', '');
   }
 
   Future<void> _leaveRoom() async {
-    await _gameProvider?.leaveRoom();
-    
-    if (mounted && !_isDisposed) {
-      Navigator.pop(context);
+    try {
+      _showSnackBar('در حال خروج از اتاق...');
+      
+      // Disconnect WebSocket before leaving
+      await _webSocketService.disconnect();
+      
+      final gameProvider = Provider.of<GameProvider>(context, listen: false);
+      await gameProvider.leaveRoom();
+      
+      if (mounted && !_isDisposed) {
+        Navigator.pushReplacementNamed(context, '/');
+      }
+    } catch (e) {
+      _showError('خطا در خروج از اتاق: $e');
+    }
+  }
+
+  void _reconnectWebSocket() {
+    if (mounted) {
+      setState(() {
+        _connectionError = null;
+      });
+    }
+    _setupWebSocket();
+  }
+
+  void _showError(String message) {
+    if (mounted) {
+      setState(() {
+        _connectionError = message;
+      });
     }
   }
 
@@ -113,268 +294,654 @@ class _LobbyScreenState extends State<LobbyScreen> {
     }
   }
 
-  void _testStartGame() {
-    _gameProvider?.testStartGame();
-    
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (ctx) => const GameScreen()),
-    );
-  }
-
   @override
   void dispose() {
     _isDisposed = true;
+    
+    // Cancel WebSocket subscription
+    _webSocketSubscription?.cancel();
+    _webSocketSubscription = null;
+    
     _chatController.dispose();
     _scrollController.dispose();
-    _gameProvider?.removeListener(_onGameStateChanged);
+    
+    // Only disconnect if we're actually leaving the room
+    // Don't disconnect on widget disposal as it might be temporary
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final gameProvider = Provider.of<GameProvider>(context);
-    final authProvider = Provider.of<AuthProvider>(context);
-    final currentUser = authProvider.authData?.user;
-    final isHost = gameProvider.isRoomHost(currentUser?.username ?? '');
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('لابی بازی'),
+        backgroundColor: const Color(0xFF1a1a1a),
+        foregroundColor: const Color(0xFFFFD700),
+        elevation: 0,
+        centerTitle: true,
         automaticallyImplyLeading: false,
         actions: [
-          if (isHost && gameProvider.canStartGame())
-            IconButton(
-              icon: const Icon(Icons.play_arrow),
-              tooltip: 'شروع بازی',
-              onPressed: _startGame,
-            ),
           IconButton(
             icon: const Icon(Icons.exit_to_app),
             onPressed: _leaveRoom,
+            tooltip: 'خروج از اتاق',
+            color: const Color(0xFFFFD700),
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    Text(
-                      gameProvider.currentRoom?.name ?? 'اتاق',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'بازیکنان: ${gameProvider.currentPlayers.length}/${gameProvider.currentRoom?.maxPlayers ?? 8}',
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          gameProvider.isWebSocketConnected 
-                            ? Icons.wifi 
-                            : Icons.wifi_off,
-                          color: gameProvider.isWebSocketConnected 
-                            ? Colors.green 
-                            : Colors.red,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          gameProvider.isWebSocketConnected ? 'متصل' : 'قطع',
-                          style: TextStyle(
-                            color: gameProvider.isWebSocketConnected 
-                              ? Colors.green 
-                              : Colors.red,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF1a1a1a),
+              Color(0xFF2C2C2C),
+            ],
+          ),
+        ),
+        child: Column(
+          children: [
+            // اطلاعات اتاق
+            _buildRoomInfoCard(gameProvider),
+            
+            // نمایش خطای اتصال
+            if (_connectionError != null)
+              _buildErrorCard(),
+            
+            // وضعیت آماده‌باش
+            _buildReadyStatusCard(),
+            
+            // دکمه شروع بازی
+            _buildStartGameButtonInline(),
+            
+            // محتوای اصلی
+            Expanded(
+              child: Column(
+                children: [
+                  // لیست بازیکنان
+                  Expanded(
+                    flex: 1,
+                    child: _buildPlayersList(),
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // چت
+                  Expanded(
+                    flex: 1,
+                    child: _buildChatSection(),
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // دکمه خروج از لابی
+                  _buildLeaveRoomButton(),
+                ],
               ),
             ),
-          ),
+          ],
+        ),
+      ),
+    );
+  }
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('وضعیت آماده‌باش:'),
-                Switch(
-                  value: _isReady,
-                  onChanged: (value) => _toggleReady(),
+  Widget _buildRoomInfoCard(GameProvider gameProvider) {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C2C2C),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B0000).withOpacity(0.3),
+            spreadRadius: 2,
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(
+          color: const Color(0xFF8B0000).withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.meeting_room,
+                color: const Color(0xFFFFD700),
+                size: 28,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                gameProvider.currentRoom?.name ?? 'اتاق',
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFFFFD700),
                 ),
-                Text(_isReady ? 'آماده' : 'آماده نیستم'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildInfoItem(
+                icon: Icons.people,
+                label: 'بازیکنان',
+                value: '${_players.length}/${gameProvider.currentRoom?.maxPlayers ?? 8}',
+                color: Colors.green,
+              ),
+              _buildInfoItem(
+                icon: _isWebSocketConnected ? Icons.wifi : Icons.wifi_off,
+                label: 'وضعیت',
+                value: _isWebSocketConnected ? 'متصل' : 'قطع',
+                color: _isWebSocketConnected ? Colors.green : Colors.red,
+              ),
+              if (!_isWebSocketConnected)
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _reconnectWebSocket,
+                  tooltip: 'تلاش مجدد برای اتصال',
+                  color: Colors.blue,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoItem({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Column(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.white70,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildErrorCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF8B0000).withOpacity(0.1),
+        border: Border.all(color: const Color(0xFF8B0000).withOpacity(0.5)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline, color: const Color(0xFFFFD700), size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _connectionError!,
+              style: const TextStyle(color: Color(0xFFFFD700)),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16),
+            onPressed: () => setState(() => _connectionError = null),
+            color: const Color(0xFFFFD700),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReadyStatusCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C2C2C),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF8B0000).withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B0000).withOpacity(0.2),
+            spreadRadius: 1,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.check_circle_outline,
+                color: _isReady ? const Color(0xFFFFD700) : Colors.white54,
+                size: 24,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'وضعیت آماده‌باش:',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              Text(
+                _isReady ? 'آماده' : 'آماده نیستم',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: _isReady ? const Color(0xFFFFD700) : Colors.white54,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Switch(
+                value: _isReady,
+                onChanged: _isWebSocketConnected ? (value) => _toggleReady() : null,
+                activeColor: const Color(0xFFFFD700),
+                activeTrackColor: const Color(0xFF8B0000).withOpacity(0.5),
+                inactiveThumbColor: const Color(0xFF404040),
+                inactiveTrackColor: const Color(0xFF404040).withOpacity(0.3),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlayersList() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C2C2C),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B0000).withOpacity(0.2),
+            spreadRadius: 1,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(
+          color: const Color(0xFF8B0000).withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF8B0000).withOpacity(0.2),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.people, color: const Color(0xFFFFD700), size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'بازیکنان اتاق (${_players.length})',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFFFD700),
+                  ),
+                ),
               ],
             ),
           ),
-
-          if (gameProvider.canStartGame() && isHost)
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text(
-                'اتاق کامل شد! می‌توانید بازی را شروع کنید',
-                style: TextStyle(
-                  color: Colors.green,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-
           Expanded(
-            flex: 2,
-            child: gameProvider.currentPlayers.isEmpty
-              ? const Center(child: Text('هیچ بازیکنی در اتاق نیست'))
-              : ListView.builder(
-                  itemCount: gameProvider.currentPlayers.length,
-                  itemBuilder: (context, index) {
-                    final player = gameProvider.currentPlayers[index];
-                    return ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: player.isReady ? Colors.green : Colors.grey,
-                        child: Text(
-                          player.username[0],
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                      ),
-                      title: Text(
-                        player.username,
-                        style: TextStyle(
-                          fontWeight: player.username == currentUser?.username 
-                            ? FontWeight.bold 
-                            : null,
-                        ),
-                      ),
-                      trailing: Icon(
-                        player.isReady ? Icons.check_circle : Icons.radio_button_unchecked,
-                        color: player.isReady ? Colors.green : Colors.grey,
-                      ),
-                      subtitle: player.username == currentUser?.username 
-                        ? const Text('شما') 
-                        : null,
-                    );
-                  },
-                ),
-          ),
-
-          Expanded(
-            flex: 1,
-            child: Container(
-              margin: const EdgeInsets.all(8.0),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey),
-                borderRadius: BorderRadius.circular(8.0),
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8.0),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(8.0)),
-                    ),
-                    child: const Row(
+            child: _players.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.chat, size: 16),
-                        SizedBox(width: 4),
-                        Text('چت اتاق'),
-                      ],
-                    ),
-                  ),
-
-                  Expanded(
-                    child: gameProvider.chatMessages.isEmpty
-                      ? const Center(child: Text('هیچ پیامی وجود ندارد'))
-                      : ListView.builder(
-                          controller: _scrollController,
-                          itemCount: gameProvider.chatMessages.length,
-                          itemBuilder: (context, index) {
-                            final message = gameProvider.chatMessages[index];
-                            return ListTile(
-                              title: Text.rich(
-                                TextSpan(
-                                  children: [
-                                    TextSpan(
-                                      text: '${message['username']}: ',
-                                      style: const TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                    TextSpan(text: message['message']),
-                                  ],
-                                ),
-                              ),
-                              dense: true,
-                            );
-                          },
+                        Icon(
+                          Icons.people_outline,
+                          size: 64,
+                          color: Colors.white54,
                         ),
-                  ),
-
-                  Container(
-                    padding: const EdgeInsets.all(8.0),
-                    decoration: BoxDecoration(
-                      border: Border(top: BorderSide(color: Colors.grey[300]!)),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _chatController,
-                            decoration: InputDecoration(
-                              hintText: 'پیام...',
-                              border: const OutlineInputBorder(),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12.0),
-                              suffixIcon: IconButton(
-                                icon: const Icon(Icons.send),
-                                onPressed: _sendChatMessage,
-                                iconSize: 20,
-                              ),
-                            ),
-                            onSubmitted: (_) => _sendChatMessage(),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'هیچ بازیکنی در اتاق نیست',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.white70,
                           ),
                         ),
                       ],
                     ),
+                  )
+                : ListView.builder(
+                    itemCount: _players.length,
+                    itemBuilder: (context, index) {
+                      final player = _players[index];
+                      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                      final currentUser = authProvider.authData?.user;
+                      final isCurrentUser = player['username'] == (currentUser?.username ?? '');
+                      
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isCurrentUser 
+                              ? const Color(0xFF8B0000).withOpacity(0.2) 
+                              : const Color(0xFF404040).withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isCurrentUser 
+                                ? const Color(0xFFFFD700).withOpacity(0.5) 
+                                : const Color(0xFF8B0000).withOpacity(0.3),
+                          ),
+                        ),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: player['is_ready'] == true 
+                                ? const Color(0xFFFFD700) 
+                                : const Color(0xFF404040),
+                            child: Text(
+                              (player['username'] ?? 'U')[0].toUpperCase(),
+                              style: const TextStyle(
+                                color: Color(0xFF1a1a1a),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            player['username'] ?? 'Unknown',
+                            style: TextStyle(
+                              fontWeight: isCurrentUser ? FontWeight.bold : FontWeight.w500,
+                              color: isCurrentUser ? const Color(0xFFFFD700) : Colors.white,
+                            ),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isCurrentUser)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFD700).withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: const Color(0xFFFFD700).withOpacity(0.5),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'شما',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFFFFD700),
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              const SizedBox(width: 8),
+                              Icon(
+                                player['is_ready'] == true 
+                                    ? Icons.check_circle 
+                                    : Icons.radio_button_unchecked,
+                                color: player['is_ready'] == true 
+                                    ? const Color(0xFFFFD700) 
+                                    : Colors.white54,
+                                size: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                ],
-              ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLeaveRoomButton() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _leaveRoom,
+        icon: const Icon(Icons.exit_to_app, size: 20),
+        label: const Text(
+          'خروج از اتاق',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF8B0000),
+          foregroundColor: const Color(0xFFFFD700),
+          elevation: 4,
+          shadowColor: const Color(0xFF8B0000).withOpacity(0.5),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatSection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C2C2C),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B0000).withOpacity(0.2),
+            spreadRadius: 1,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(
+          color: const Color(0xFF8B0000).withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF8B0000).withOpacity(0.2),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.chat, color: const Color(0xFFFFD700), size: 20),
+                const SizedBox(width: 8),
+                const Text(
+                  'چت اتاق',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFFFD700),
+                  ),
+                ),
+              ],
             ),
           ),
-
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                if (gameProvider.currentPlayers.length >= 2) ...[
-                  ElevatedButton(
-                    onPressed: _testStartGame,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 50),
+          Expanded(
+            child: _chatMessages.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline,
+                          size: 64,
+                          color: Colors.white54,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'هیچ پیامی وجود ندارد',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.white70,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'اولین پیام را ارسال کنید!',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.white54,
+                          ),
+                        ),
+                      ],
                     ),
-                    child: const Text('تست شروع بازی (2 نفر)'),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    itemCount: _chatMessages.length,
+                    itemBuilder: (context, index) {
+                      final message = _chatMessages[index];
+                      final isSystemMessage = message['username'] == 'سیستم';
+                      final isMyMessage = message['username'] == 'شما';
+                      
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        child: Row(
+                          mainAxisAlignment: isMyMessage 
+                              ? MainAxisAlignment.end 
+                              : MainAxisAlignment.start,
+                          children: [
+                            if (!isMyMessage && !isSystemMessage)
+                              CircleAvatar(
+                                radius: 12,
+                                backgroundColor: const Color(0xFF8B0000).withOpacity(0.3),
+                                child: Text(
+                                  (message['username'] ?? 'U')[0].toUpperCase(),
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Color(0xFFFFD700),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: isSystemMessage
+                                      ? const Color(0xFF8B0000).withOpacity(0.3)
+                                      : isMyMessage
+                                          ? const Color(0xFFFFD700).withOpacity(0.2)
+                                          : const Color(0xFF404040).withOpacity(0.5),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: isSystemMessage
+                                        ? const Color(0xFF8B0000).withOpacity(0.5)
+                                        : isMyMessage
+                                            ? const Color(0xFFFFD700).withOpacity(0.3)
+                                            : const Color(0xFF8B0000).withOpacity(0.2),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (!isSystemMessage)
+                                      Text(
+                                        message['username'] ?? 'Unknown',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: isMyMessage ? const Color(0xFFFFD700) : Colors.white70,
+                                        ),
+                                      ),
+                                    Text(
+                                      message['message'] ?? '',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: isSystemMessage ? const Color(0xFFFFD700) : Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
-                  const SizedBox(height: 8),
-                ],
-
-                ElevatedButton.icon(
-                  onPressed: _leaveRoom,
-                  icon: const Icon(Icons.exit_to_app),
-                  label: const Text('خروج از اتاق'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(double.infinity, 50),
+          ),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: Colors.grey[200]!)),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _chatController,
+                    decoration: InputDecoration(
+                      hintText: 'پیام خود را بنویسید...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      enabled: _isWebSocketConnected,
+                    ),
+                    onSubmitted: _isWebSocketConnected ? (_) => _sendChatMessage() : null,
+                    maxLines: null,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: _isWebSocketConnected ? Colors.blue[600] : Colors.grey[400],
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.send, color: Colors.white),
+                    onPressed: _isWebSocketConnected ? _sendChatMessage : null,
+                    tooltip: 'ارسال پیام',
                   ),
                 ),
               ],
@@ -383,5 +950,138 @@ class _LobbyScreenState extends State<LobbyScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildStartGameButtonInline() {
+    final gameProvider = Provider.of<GameProvider>(context, listen: false);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final currentUser = authProvider.authData?.user;
+    
+    final isHost = gameProvider.isRoomHost(currentUser?.username ?? '');
+    
+    // Use _players from WebSocket instead of gameProvider.currentPlayers
+    final readyPlayers = _players.where((p) => p['is_ready'] == true).length;
+    final totalPlayers = _players.length;
+    final canStart = readyPlayers >= 4;
+
+    // Only show button to host
+    if (!isHost) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        children: [
+          if (!canStart)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF8B0000).withOpacity(0.1),
+                border: Border.all(color: const Color(0xFF8B0000).withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: const Color(0xFFFFD700), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'برای شروع بازی حداقل 4 بازیکن آماده نیاز است (${readyPlayers}/${totalPlayers})',
+                      style: const TextStyle(
+                        color: Color(0xFFFFD700),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          
+          const SizedBox(height: 8),
+          
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: canStart && _isWebSocketConnected ? _showStartGameDialog : null,
+              icon: const Icon(Icons.play_arrow, size: 20),
+              label: Text(
+                canStart ? 'شروع بازی' : 'منتظر بازیکنان...',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: canStart ? const Color(0xFF4CAF50) : const Color(0xFF404040),
+                foregroundColor: Colors.white,
+                elevation: 4,
+                shadowColor: canStart ? const Color(0xFF4CAF50).withOpacity(0.5) : Colors.grey.withOpacity(0.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  void _showStartGameDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2C2C2C),
+        title: Row(
+          children: [
+            Icon(Icons.play_arrow, color: const Color(0xFFFFD700)),
+            const SizedBox(width: 8),
+            const Text(
+              'شروع بازی',
+              style: TextStyle(color: Color(0xFFFFD700)),
+            ),
+          ],
+        ),
+        content: const Text(
+          'آیا مطمئن هستید که می‌خواهید بازی را شروع کنید؟',
+          style: TextStyle(color: Colors.white),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'لغو',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _startGame();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF4CAF50),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('شروع بازی'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _startGame() async {
+    try {
+      final gameProvider = Provider.of<GameProvider>(context, listen: false);
+      await gameProvider.startGame();
+      
+      // Navigate to game screen after successful start
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/game');
+      }
+    } catch (e) {
+      _showError('خطا در شروع بازی: $e');
+    }
   }
 }

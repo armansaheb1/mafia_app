@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/game_service.dart';
 import '../services/websocket_service.dart';
@@ -24,6 +25,7 @@ class GameProvider with ChangeNotifier {
   bool _hasNightAction = false;
   final List<Map<String, String>> _chatMessages = [];
   SharedPreferences? _prefs;
+  Timer? _gameTimer;
 
   List<Room> get rooms => _rooms;
   Room? get currentRoom => _currentRoom;
@@ -52,7 +54,6 @@ class GameProvider with ChangeNotifier {
       
       if (roomName != null && phase != null) {
         _currentPhase = phase;
-        print('✅ Loaded game state: Room=$roomName, Phase=$phase');
       }
     } catch (e) {
       print('❌ Error loading game state: $e');
@@ -65,7 +66,6 @@ class GameProvider with ChangeNotifier {
     try {
       await _prefs!.setString('last_room', _currentRoom!.name);
       await _prefs!.setString('last_phase', _currentPhase!);
-      print('💾 Saved game state: Room=${_currentRoom!.name}, Phase=$_currentPhase');
     } catch (e) {
       print('❌ Error saving game state: $e');
     }
@@ -77,7 +77,6 @@ class GameProvider with ChangeNotifier {
     try {
       await _prefs!.remove('last_room');
       await _prefs!.remove('last_phase');
-      print('🧹 Cleared saved game state');
     } catch (e) {
       print('❌ Error clearing saved game state: $e');
     }
@@ -110,11 +109,11 @@ class GameProvider with ChangeNotifier {
     }
   }
 
-  Future<void> createRoom(String name, int maxPlayers, bool isPrivate, [String password = '']) async {
+  Future<void> createRoom(String name, int maxPlayers, bool isPrivate, [String password = '', int? scenarioId]) async {
     _setLoading(true);
     try {
       _setErrorMessage(null);
-      final room = await _gameService.createRoom(name, maxPlayers, isPrivate, password);
+      final room = await _gameService.createRoom(name, maxPlayers, isPrivate, password, scenarioId);
       _setCurrentRoom(room);
       
       _addPlayer(Player(
@@ -125,6 +124,9 @@ class GameProvider with ChangeNotifier {
         isAlive: true,
         isReady: true,
         joinedAt: DateTime.now(),
+        votesReceived: 0,
+        isProtected: false,
+        specialActionsUsed: {},
       ));
       
     } catch (e) {
@@ -179,14 +181,26 @@ class GameProvider with ChangeNotifier {
       _setLoading(true);
       
       await _webSocketService.connectToRoom(roomName);
-      _setWebSocketConnected(true);
+      _setWebSocketConnected(_webSocketService.isConnected);
       
-      _webSocketService.messages.listen((message) {
-        _handleWebSocketMessage(message);
-      });
+      if (_webSocketService.isConnected) {
+        _webSocketService.messages.listen(
+          (message) {
+            _handleWebSocketMessage(message);
+          },
+          onError: (error) {
+            print('❌ WebSocket listener error: $error');
+            _setWebSocketConnected(false);
+            _setErrorMessage('اتصال WebSocket قطع شد: $error');
+          },
+        );
+      } else {
+        throw Exception('WebSocket connection failed');
+      }
       
     } catch (e) {
       _setErrorMessage('اتصال به اتاق ناموفق بود: $e');
+      _setWebSocketConnected(false);
       rethrow;
     } finally {
       _setLoading(false);
@@ -200,76 +214,39 @@ class GameProvider with ChangeNotifier {
       final messageData = data['data'] ?? data['message'];
       final username = data['username'];
 
-      print('📨 WebSocket: $type - $messageData');
-
       switch (type) {
-        case 'player_joined':
-          _addPlayer(Player(
-            id: 0,
-            userId: 0,
-            username: username,
-            roomId: _currentRoom?.id ?? 0,
-            isAlive: true,
-            isReady: false,
-            joinedAt: DateTime.now(),
-          ));
-          _addChatMessage('سیستم', '$username به اتاق پیوست');
-          break;
-          
-        case 'player_left':
-          _removePlayer(username);
-          _addChatMessage('سیستم', '$username اتاق را ترک کرد');
+        case 'lobby_state':
+        case 'lobby_update':
+          _handleLobbyUpdate(data);
           break;
           
         case 'player_ready':
-          _togglePlayerReady(username);
-          final status = _currentPlayers.firstWhere((p) => p.username == username).isReady ? 'آماده' : 'آماده نیست';
-          _addChatMessage('سیستم', '$username $status شد');
+          _handlePlayerReady(data);
           break;
-
+          
         case 'chat_message':
           _addChatMessage(username, messageData);
-          break;
-
-        case 'game_started':
-          _handleGameStarted(messageData);
-          break;
-
-        case 'phase_changed':
-          _handlePhaseChanged(messageData);
-          break;
-
-        case 'player_died':
-          _updatePlayerStatus(username, false);
-          _addChatMessage('سیستم', '$username کشته شد!');
-          break;
-
-        case 'player_healed':
-          _updatePlayerStatus(username, true);
-          _addChatMessage('سیستم', '$username درمان شد!');
-          break;
-
-        case 'vote_received':
-          _setHasVoted(true);
-          break;
-
-        case 'night_action_received':
-          _setHasNightAction(true);
-          break;
-
-        case 'game_ended':
-          _setCurrentPhase('finished');
-          _addChatMessage('سیستم', 'بازی تمام شد! برنده: ${messageData['winner']}');
-          break;
-
-        case 'role_assigned':
-          _setUserRole(messageData['role']);
-          _addChatMessage('سیستم', 'نقش شما: ${_getRoleName(messageData['role'])}');
           break;
 
         case 'error':
           _setErrorMessage(messageData);
           _addChatMessage('خطا', messageData);
+          break;
+
+        case 'vote_cast':
+          _addChatMessage('سیستم', '${data['voter']} به ${data['target']} رای داد');
+          break;
+
+        case 'night_action_taken':
+          _addChatMessage('سیستم', '${data['player']} اقدام ${data['action_type']} انجام داد');
+          break;
+
+        case 'phase_ended':
+          _handlePhaseEnded(data);
+          break;
+
+        case 'game_started':
+          _handleGameStarted(data);
           break;
       }
       
@@ -278,26 +255,33 @@ class GameProvider with ChangeNotifier {
     }
   }
 
-  void _handleGameStarted(dynamic messageData) {
-    _setCurrentPhase('night');
-    _setUserRole(messageData['role']);
-    _setHasNightAction(false);
-    _setHasVoted(false);
-    _addChatMessage('سیستم', 'بازی شروع شد! نقش شما: ${_getRoleName(messageData['role'])}');
-    
-    for (var player in _currentPlayers) {
-      if (player.role == null) {
-        final testRole = _assignTestRole(player.username);
-        _updatePlayerRole(player.username, testRole);
+  void _handleLobbyUpdate(Map<String, dynamic> data) {
+    try {
+      final players = data['players'] as List<dynamic>;
+      final playersList = players.map((playerData) => Player.fromJson(playerData)).toList();
+      _setCurrentPlayers(playersList);
+      
+      if (data.containsKey('message')) {
+        _addChatMessage('سیستم', data['message']);
       }
+    } catch (e) {
+      print('❌ Error handling lobby update: $e');
     }
   }
 
-  void _handlePhaseChanged(dynamic messageData) {
-    _setCurrentPhase(messageData['phase']);
-    _setHasNightAction(false);
-    _setHasVoted(false);
-    _addChatMessage('سیستم', 'فاز تغییر کرد: ${_getPhaseName(messageData['phase'])}');
+  void _handlePlayerReady(Map<String, dynamic> data) {
+    try {
+      final username = data['username'];
+      final isReady = data['is_ready'];
+      final players = data['players'] as List<dynamic>;
+      
+      _updatePlayerReadyStatus(username, isReady);
+      _setCurrentPlayers(players.map((p) => Player.fromJson(p)).toList());
+      
+      _addChatMessage('سیستم', '$username ${isReady ? 'آماده' : 'آماده نیست'} شد');
+    } catch (e) {
+      print('❌ Error handling player ready: $e');
+    }
   }
 
   void sendReadyStatus() {
@@ -309,23 +293,112 @@ class GameProvider with ChangeNotifier {
     _addChatMessage('شما', message);
   }
 
-  void sendVote(String targetUsername) {
-    _webSocketService.sendMessage('vote', targetUsername);
-    _setHasVoted(true);
-  }
-
-  void sendNightAction(String actionType, String targetUsername) {
-    _webSocketService.sendMessage('night_action', {
-      'action_type': actionType,
-      'target': targetUsername,
-    });
-    _setHasNightAction(true);
-  }
-
-  void startGame() {
-    if (canStartGame()) {
-      _webSocketService.sendMessage('start_game', '');
+  Future<void> sendVote(String targetUsername, {String voteType = 'lynch'}) async {
+    try {
+      await _gameService.vote(targetUsername, voteType: voteType);
+      _webSocketService.sendMessage('vote', targetUsername);
+    } catch (e) {
+      _setErrorMessage('خطا در ارسال رای: $e');
     }
+  }
+
+  Future<void> sendNightAction(String actionType, {String? targetUsername}) async {
+    try {
+      await _gameService.nightAction(actionType, targetUsername: targetUsername);
+      _webSocketService.sendMessage('night_action', {
+        'action_type': actionType,
+        'target': targetUsername,
+      });
+    } catch (e) {
+      _setErrorMessage('خطا در انجام اقدام شب: $e');
+    }
+  }
+
+  Future<void> endPhase() async {
+    if (_currentRoom == null) return;
+    
+    try {
+      await _gameService.endPhase(_currentRoom!.id);
+      _webSocketService.sendMessage('end_phase', '');
+    } catch (e) {
+      _setErrorMessage('خطا در پایان فاز: $e');
+    }
+  }
+
+  Future<void> startGame() async {
+    if (_currentRoom == null) return;
+    
+    try {
+      _setLoading(true);
+      final result = await _gameService.startGame(_currentRoom!.id);
+      
+      // Update game state with the response
+      if (result.containsKey('game_state')) {
+        final gameStateData = result['game_state'];
+        _setCurrentPhase(gameStateData['phase']);
+        _addChatMessage('سیستم', 'بازی شروع شد!');
+        
+        // Start game timer
+        _startGameTimer();
+      }
+      
+    } catch (e) {
+      _setErrorMessage('خطا در شروع بازی: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> refreshGameInfo() async {
+    try {
+      final gameInfo = await _gameService.getGameInfo();
+      final gameState = GameState.fromJson(gameInfo);
+      
+      _setCurrentGameState(gameState);
+      _setCurrentPhase(gameState.phase);
+    } catch (e) {
+      print('❌ Error refreshing game info: $e');
+    }
+  }
+
+  void _startGameTimer() {
+    _gameTimer?.cancel();
+    _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_currentRoom?.status == 'in_progress') {
+        refreshGameInfo();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _stopGameTimer() {
+    _gameTimer?.cancel();
+    _gameTimer = null;
+  }
+
+  void returnToLobby() {
+    _setCurrentPhase('waiting');
+    _addChatMessage('سیستم', 'بازگشت به لابی');
+  }
+
+  bool canPerformNightAction() {
+    return _currentPhase == 'night' && 
+           _userRole != null && 
+           _userRole != 'citizen' && 
+           !_hasNightAction;
+  }
+
+  bool canVote() {
+    return _currentPhase == 'day' && !_hasVoted;
+  }
+
+  bool canStartGame() {
+    if (_currentRoom == null) return false;
+    
+    // Check if there are at least 4 ready players
+    final readyPlayers = _currentPlayers.where((player) => player.isReady).length;
+    return readyPlayers >= 4;
   }
 
   Future<void> leaveRoom() async {
@@ -341,9 +414,22 @@ class GameProvider with ChangeNotifier {
     }
   }
 
+  // متد اضافی برای cleanup کامل هنگام بستن اپ
+  Future<void> forceCleanup() async {
+    try {
+      await _webSocketService.disconnect();
+    } catch (e) {
+      print('❌ Error in force cleanup: $e');
+    } finally {
+      _cleanup();
+    }
+  }
+
   void _cleanup() {
+    _stopGameTimer();
     _setWebSocketConnected(false);
     _clearGameState();
+    _clearSavedGameState();
   }
 
   Future<void> checkActiveGame() async {
@@ -417,65 +503,21 @@ class GameProvider with ChangeNotifier {
     _saveGameState();
   }
 
-  void _setUserRole(String? role) {
-    _userRole = role;
-    notifyListeners();
-  }
-
-  void _setHasVoted(bool voted) {
-    _hasVoted = voted;
-    notifyListeners();
-  }
-
-  void _setHasNightAction(bool hasAction) {
-    _hasNightAction = hasAction;
-    notifyListeners();
-  }
-
   void _addPlayer(Player player) {
-    _currentPlayers.add(player);
-    notifyListeners();
-    _checkAutoStart();
-  }
-
-  void _removePlayer(String username) {
-    _currentPlayers.removeWhere((player) => player.username == username);
-    notifyListeners();
-  }
-
-  void _togglePlayerReady(String username) {
-    final index = _currentPlayers.indexWhere((p) => p.username == username);
-    if (index != -1) {
-      _currentPlayers[index] = _currentPlayers[index].copyWith(
-        isReady: !_currentPlayers[index].isReady,
-      );
-      notifyListeners();
-      _checkAutoStart();
-    }
-  }
-  
-  void returnToLobby() {
-    _setCurrentPhase('waiting');
-    _setHasNightAction(false);
-    _setHasVoted(false);
-    _addChatMessage('سیستم', 'بازگشت به لابی');
-  }
-
-  void _updatePlayerStatus(String username, bool isAlive) {
-    final index = _currentPlayers.indexWhere((p) => p.username == username);
-    if (index != -1) {
-      _currentPlayers[index] = _currentPlayers[index].copyWith(isAlive: isAlive);
+    if (!_currentPlayers.any((p) => p.username == player.username)) {
+      _currentPlayers.add(player);
       notifyListeners();
     }
   }
 
-  void _updatePlayerRole(String username, String role) {
+  void _updatePlayerReadyStatus(String username, bool isReady) {
     final index = _currentPlayers.indexWhere((p) => p.username == username);
     if (index != -1) {
-      _currentPlayers[index] = _currentPlayers[index].copyWith(role: role);
+      _currentPlayers[index] = _currentPlayers[index].copyWith(isReady: isReady);
       notifyListeners();
     }
   }
+
 
   void _addChatMessage(String username, String message) {
     _chatMessages.add({
@@ -486,77 +528,45 @@ class GameProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void _checkAutoStart() {
-    if (canStartGame() && isRoomHost(_currentPlayers.first.username)) {
-      Future.delayed(const Duration(seconds: 3), () {
-        if (canStartGame()) {
-          startGame();
-        }
-      });
+  void _handlePhaseEnded(Map<String, dynamic> data) {
+    try {
+      final gameInfo = data['game_info'] as Map<String, dynamic>;
+      final gameState = GameState.fromJson(gameInfo);
+      
+      _setCurrentGameState(gameState);
+      _setCurrentPhase(gameState.phase);
+      
+      if (gameState.winner != null) {
+        _addChatMessage('سیستم', 'بازی تمام شد! برنده: ${gameState.winner}');
+        _setCurrentPhase('finished');
+      } else {
+        _addChatMessage('سیستم', 'فاز ${gameState.phase} شروع شد');
+      }
+    } catch (e) {
+      print('❌ Error handling phase ended: $e');
+    }
+  }
+
+  void _handleGameStarted(Map<String, dynamic> data) {
+    try {
+      final message = data['message'] as String;
+      final gameStateData = data['game_state'] as Map<String, dynamic>;
+      
+      _addChatMessage('سیستم', message);
+      _setCurrentPhase(gameStateData['phase']);
+      
+      // Start game timer
+      _startGameTimer();
+      
+      // Refresh game info to get complete game state
+      refreshGameInfo();
+    } catch (e) {
+      print('❌ Error handling game started: $e');
     }
   }
 
   // ========== Helper Methods ==========
-  Player? getCurrentPlayer(String username) {
-    final index = _currentPlayers.indexWhere((p) => p.username == username);
-    return index != -1 ? _currentPlayers[index] : null;
-  }
-
-  bool canPerformNightAction() {
-    return _currentPhase == 'night' && 
-           _userRole != null && 
-           _userRole != 'citizen' && 
-           !_hasNightAction;
-  }
-
-  bool canVote() {
-    return _currentPhase == 'day' && !_hasVoted;
-  }
-
   bool isRoomHost(String username) {
     return _currentRoom?.hostName == username;
-  }
-
-  bool canStartGame() {
-    return _currentPlayers.length >= 4 &&
-           _currentPlayers.every((player) => player.isReady) &&
-           (_currentPhase == null || _currentPhase == 'waiting');
-  }
-
-  String _getPhaseName(String? phase) {
-    switch (phase) {
-      case 'night': return 'شب';
-      case 'day': return 'روز';
-      case 'voting': return 'رای‌گیری';
-      case 'finished': return 'پایان بازی';
-      default: return 'در انتظار';
-    }
-  }
-
-  String _getRoleName(String? role) {
-    switch (role) {
-      case 'mafia': return 'مافیا';
-      case 'detective': return 'کارآگاه';
-      case 'doctor': return 'دکتر';
-      case 'citizen': return 'شهروند';
-      default: return 'نقش نامشخص';
-    }
-  }
-
-  String _assignTestRole(String username) {
-    final roles = ['mafia', 'detective', 'doctor', 'citizen'];
-    final index = _currentPlayers.indexWhere((p) => p.username == username) % roles.length;
-    return roles[index];
-  }
-
-  void testStartGame() {
-    _setCurrentPhase('night');
-    _setUserRole('mafia');
-    
-    for (var player in _currentPlayers) {
-      _updatePlayerRole(player.username, _assignTestRole(player.username));
-    }
-    
-    _addChatMessage('سیستم', 'بازی تستی شروع شد!');
   }
 }

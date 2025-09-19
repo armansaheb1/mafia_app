@@ -3,9 +3,10 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/room.dart';
 import '../models/player.dart';
+import 'platform_service.dart';
 
 class GameService {
-  static const String _baseUrl = 'http://10.0.2.2:8000/api/game/';
+  static String get _baseUrl => '${PlatformService.getBaseUrl()}/api/game/';
 
   Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -67,7 +68,7 @@ class GameService {
     }
   }
 
-  Future<Room> createRoom(String name, int maxPlayers, bool isPrivate, [String password = '']) async {
+  Future<Room> createRoom(String name, int maxPlayers, bool isPrivate, [String password = '', int? scenarioId]) async {
     final headers = await _getHeaders();
     final response = await http.post(
       Uri.parse('${_baseUrl}rooms/create/'),
@@ -77,6 +78,7 @@ class GameService {
         'max_players': maxPlayers,
         'is_private': isPrivate,
         'password': password,
+        if (scenarioId != null) 'scenario': scenarioId,
       }),
     );
 
@@ -88,15 +90,15 @@ class GameService {
   }
 
   Future<Map<String, dynamic>> joinRoom(String roomName, [String password = '']) async {
-    final headers = await _getHeaders();
-    final response = await http.post(
-      Uri.parse('${_baseUrl}rooms/join/'),
-      headers: headers,
-      body: json.encode({
-        'room_name': roomName,
-        'password': password,
-      }),
-    );
+  final headers = await _getHeaders();
+  final response = await http.post(
+    Uri.parse('${_baseUrl}rooms/join/'),
+    headers: headers,
+    body: json.encode({
+      'room_name': roomName,  // نه 'room_name'
+      'password': password,
+    }),
+  );
 
     if (response.statusCode == 200) {
       final responseData = json.decode(response.body);
@@ -146,6 +148,203 @@ class GameService {
       print('Successfully left room');
     } else {
       throw Exception('Failed to leave room: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  // API های جدید برای بازی
+  Future<void> vote(String targetUsername, {String voteType = 'lynch'}) async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}game/vote/'),
+      headers: headers,
+      body: json.encode({
+        'target_username': targetUsername,
+        'vote_type': voteType,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to vote: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<void> nightAction(String actionType, {String? targetUsername}) async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}game/night-action/'),
+      headers: headers,
+      body: json.encode({
+        'action_type': actionType,
+        'target_username': targetUsername,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to perform night action: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<void> endPhase(int roomId) async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}game/end-phase/'),
+      headers: headers,
+      body: json.encode({'room_id': roomId}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to end phase: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getGameInfo() async {
+    final headers = await _getHeaders();
+    
+    final response = await http.get(
+      Uri.parse('${_baseUrl}game/info/'),
+      headers: headers,
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception('Failed to get game info: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  // API های سیستم صحبت
+  Future<void> startSpeaking() async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}speaking/start/'),
+      headers: headers,
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to start speaking: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<void> endSpeaking() async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}speaking/end/'),
+      headers: headers,
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to end speaking: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<void> challengeSpeaking() async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}speaking/challenge/'),
+      headers: headers,
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to challenge speaking: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<void> respondToChallenge(bool accepted) async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}speaking/respond-challenge/'),
+      headers: headers,
+      body: json.encode({'accepted': accepted}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to respond to challenge: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<void> addSpeakingReaction(String reactionType, int speakingTurnId) async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}speaking/reaction/'),
+      headers: headers,
+      body: json.encode({
+        'reaction_type': reactionType,
+        'speaking_turn_id': speakingTurnId,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to add reaction: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getSpeakingQueue() async {
+    final headers = await _getHeaders();
+    
+    final response = await http.get(
+      Uri.parse('${_baseUrl}speaking/queue/'),
+      headers: headers,
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception('Failed to get speaking queue: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  // API میز بازی
+  Future<Map<String, dynamic>> getGameTableInfo() async {
+    final headers = await _getHeaders();
+    
+    // ابتدا سعی کن از API جدید استفاده کن
+    try {
+      final response = await http.get(
+        Uri.parse('${_baseUrl}rooms/table-info/'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      }
+    } catch (e) {
+      print('⚠️ Room table info failed, trying game table info: $e');
+    }
+    
+    // اگر API جدید کار نکرد، از API قدیمی استفاده کن
+    final response = await http.get(
+      Uri.parse('${_baseUrl}game/table-info/'),
+      headers: headers,
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception('Failed to get table info: ${response.statusCode} - ${response.body}');
+    }
+  }
+
+  Future<Map<String, dynamic>> startGame(int roomId) async {
+    final headers = await _getHeaders();
+    
+    final response = await http.post(
+      Uri.parse('${_baseUrl}rooms/start/'),
+      headers: headers,
+      body: json.encode({'room_id': roomId}),
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception('Failed to start game: ${response.statusCode} - ${response.body}');
     }
   }
 }

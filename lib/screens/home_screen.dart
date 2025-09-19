@@ -1,10 +1,10 @@
+// lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/game_provider.dart';
 import '../providers/auth_provider.dart';
 import 'create_room_screen.dart';
 import 'join_room_screen.dart';
-import 'lobby_screen.dart';
+import 'scenario_slider_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,62 +19,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadRooms();
-    });
-  }
-
-  Future<void> _loadRooms() async {
-    final gameProvider = context.read<GameProvider>();
-    try {
-      await gameProvider.fetchRooms();
-    } catch (e) {
-      if (e.toString().contains('احراز هویت')) {
-        context.read<AuthProvider>().logout();
-      } else {
-        _showSnackBar('خطا در دریافت اتاق‌ها: $e');
-      }
-    }
-  }
-
-  void _joinRoom(String roomName) {
-    // استفاده از Future.microtask برای اجرای بعد از build phase
-    Future.microtask(() async {
-      final gameProvider = context.read<GameProvider>();
-      try {
-        await gameProvider.joinRoom(roomName);
-        await gameProvider.connectToWebSocket(roomName);
-        
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) => const LobbyScreen(),
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          _showSnackBar('خطا در پیوستن به اتاق: $e');
-        }
-      }
-    });
   }
 
   void _handleLogout() {
     context.read<AuthProvider>().logout();
-  }
-
-  void _handleRefresh() {
-    _loadRooms();
-  }
-
-  void _showSnackBar(String message) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    });
   }
 
   @override
@@ -82,46 +30,175 @@ class _HomeScreenState extends State<HomeScreen> {
     return ScaffoldMessenger(
       key: _scaffoldMessengerKey,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('اتاق‌های بازی'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: _handleLogout,
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFF1a1a1a),
+                Color(0xFF2C2C2C),
+              ],
             ),
+          ),
+          child: SafeArea(
+            child: Column(
+              children: [
+                // Header
+                _buildHeader(),
+                
+                // Main Content
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        // Welcome Section
+                        _buildWelcomeSection(),
+                        
+                        const SizedBox(height: 32),
+                        
+                        // Quick Actions
+                        _buildQuickActions(),
+                        
+                        const SizedBox(height: 32),
+                        
+                        // Scenario Slider Button
+                        _buildScenarioSliderButton(),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          // Logo/Title
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFD700).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFFFFD700),
+                      width: 2,
+                    ),
+                  ),
+                  child: const Text(
+                    '🎭',
+                    style: TextStyle(fontSize: 24),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Mafia Game',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: const Color(0xFFFFD700),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Action Buttons
+          Row(
+            children: [
             IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: _handleRefresh,
+              onPressed: _handleLogout,
+                icon: const Icon(Icons.logout, color: Color(0xFFFFD700)),
+                tooltip: 'خروج',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWelcomeSection() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF8B0000),
+            Color(0xFF2C2C2C),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B0000).withOpacity(0.3),
+            blurRadius: 20,
+            spreadRadius: 5,
             ),
           ],
         ),
-        body: Consumer<GameProvider>(
-          builder: (context, gameProvider, child) {
-            return gameProvider.isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : gameProvider.errorMessage != null
-                    ? Center(
                         child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text('خطا: ${gameProvider.errorMessage}'),
-                            const SizedBox(height: 20),
-                            ElevatedButton(
-                              onPressed: _handleRefresh,
-                              child: const Text('تلاش مجدد'),
+          const Text(
+            '🎯',
+            style: TextStyle(fontSize: 48),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'به بازی مافیا خوش آمدید',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              color: const Color(0xFFFFD700),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'سناریو مورد نظر خود را انتخاب کنید و وارد دنیای مافیا شوید',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: Colors.white70,
+              height: 1.5,
+            ),
                             ),
                           ],
                         ),
-                      )
-                    : Column(
+    );
+  }
+
+  Widget _buildQuickActions() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        Text(
+          'دسترسی سریع',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            color: const Color(0xFFFFD700),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
                               children: [
-                                ElevatedButton(
-                                  onPressed: () {
+            Expanded(
+              child: _buildActionCard(
+                icon: Icons.add,
+                title: 'ساخت اتاق',
+                subtitle: 'اتاق جدید بسازید',
+                color: const Color(0xFF4CAF50),
+                onTap: () {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -129,10 +206,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     );
                                   },
-                                  child: const Text('ساخت اتاق جدید'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: () {
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _buildActionCard(
+                icon: Icons.login,
+                title: 'پیوستن',
+                subtitle: 'به اتاق موجود',
+                color: const Color(0xFF2196F3),
+                onTap: () {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -140,35 +223,142 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     );
                                   },
-                                  child: const Text('پیوستن به اتاق'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: color.withOpacity(0.3),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 32,
+              color: color,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: color,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Colors.white70,
+              ),
+              textAlign: TextAlign.center,
                                 ),
                               ],
                             ),
                           ),
-                          Expanded(
-                            child: gameProvider.rooms.isEmpty
-                                ? const Center(
-                                    child: Text('هیچ اتاقی موجود نیست'),
-                                  )
-                                : ListView.builder(
-                                    itemCount: gameProvider.rooms.length,
-                                    itemBuilder: (ctx, index) {
-                                      final room = gameProvider.rooms[index];
-                                      return ListTile(
-                                        title: Text(room.name),
-                                        subtitle: Text(
-                                            'سازنده: ${room.hostName} - بازیکنان: ${room.currentPlayers}/${room.maxPlayers}'),
-                                        trailing: ElevatedButton(
-                                          onPressed: () => _joinRoom(room.name),
-                                          child: const Text('پیوستن'),
+    );
+  }
+
+  Widget _buildScenarioSliderButton() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFFFD700),
+            Color(0xFF8B0000),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFFD700).withOpacity(0.3),
+            blurRadius: 20,
+            spreadRadius: 5,
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (ctx) => const ScenarioSliderScreen(),
                                         ),
                                       );
                                     },
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                const Text(
+                  '🎭',
+                  style: TextStyle(fontSize: 48),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'انتخاب سناریو',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'سناریو مورد نظر خود را انتخاب کنید و اتاق‌های مربوطه را ببینید',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Colors.white70,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.swipe,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'اسلاید کنید',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
                                   ),
                           ),
                         ],
-                      );
-          },
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

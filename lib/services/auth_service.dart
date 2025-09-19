@@ -5,13 +5,14 @@ import 'package:http/http.dart' as http;
 import 'package:mafia_app/models/user.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/auth_response.dart';
+import 'platform_service.dart';
 
 class AuthService {
-  static const String _baseUrl = 'http://10.0.2.2:8000/api/auth/';
+  static String get _baseUrl => '${PlatformService.getBaseUrl()}/api/auth/';
 
   Future<AuthResponse> register(String username, String email, String password, String rePassword) async {
-    final response = await http.post(
-      Uri.parse('${_baseUrl}users/'), // <-- تغییر آدرس
+  final response = await http.post(
+    Uri.parse('${_baseUrl}users/'),
       headers: <String, String>{
         'Content-Type': 'application/json; charset=UTF-8',
       },

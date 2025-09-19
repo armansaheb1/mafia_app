@@ -32,7 +32,7 @@ class _JoinRoomScreenState extends State<JoinRoomScreen> {
       // ignore: use_build_context_synchronously
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (ctx) => const LobbyScreen(), // بعداً می‌سازیم
+          builder: (ctx) => LobbyScreen(), // بعداً می‌سازیم
         ),
       );
     } catch (e) {

@@ -3,8 +3,18 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'platform_service.dart';
 
 class ApiInterceptor {
+  static Future<Map<String, String>> getHeaders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('access_token');
+    
+    return {
+      'Content-Type': 'application/json; charset=UTF-8',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+  }
   static Future<http.Response> authenticatedRequest(
     Future<http.Response> Function() requestFn,
   ) async {
@@ -20,7 +30,7 @@ class ApiInterceptor {
       final refreshToken = prefs.getString('refresh_token');
       if (refreshToken != null) {
         final refreshResponse = await http.post(
-          Uri.parse('http://10.0.2.2:8000/api/auth/jwt/refresh/'),
+          Uri.parse('${PlatformService.getBaseUrl()}/api/auth/jwt/refresh/'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'refresh': refreshToken}),
         );
