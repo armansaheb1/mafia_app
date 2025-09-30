@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/game_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/login_screen.dart';
+import 'screens/register_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/lobby_screen.dart';
 import 'screens/game_screen.dart';
@@ -35,11 +37,9 @@ class MyApp extends StatelessWidget {
         primary: mafiaRed,
         secondary: mafiaGold,
         surface: mafiaDark,
-        background: mafiaDark,
         onPrimary: Colors.white,
         onSecondary: mafiaDark,
         onSurface: Colors.white,
-        onBackground: Colors.white,
       ),
       scaffoldBackgroundColor: mafiaDark,
       appBarTheme: const AppBarTheme(
@@ -103,14 +103,14 @@ class MyApp extends StatelessWidget {
         hintStyle: const TextStyle(color: Colors.white54),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return mafiaGold;
           }
           return mafiaLightGray;
         }),
-        trackColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return mafiaRed.withOpacity(0.5);
           }
           return mafiaLightGray.withOpacity(0.3);
@@ -140,6 +140,7 @@ class MyApp extends StatelessWidget {
             home: const AuthWrapper(),
         routes: {
           '/login': (ctx) => const LoginScreen(),
+          '/register': (ctx) => const RegisterScreen(),
           '/home': (ctx) => const ScenarioSliderScreen(),
           '/old-home': (ctx) => const HomeScreen(),
           '/lobby': (ctx) => LobbyScreen(),
@@ -259,33 +260,44 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
       );
     }
 
-    final authProvider = context.watch<AuthProvider>();
-    final gameProvider = context.watch<GameProvider>();
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, child) {
+        final gameProvider = context.watch<GameProvider>();
 
-    // اگر کاربر لاگین نکرده باشد
-    if (!authProvider.isLoggedIn) {
-      return const LoginScreen();
-    }
+        // Debug log for auth status
+        if (kDebugMode) {
+          print('🔍 AuthWrapper - isLoggedIn: ${authProvider.isLoggedIn}');
+        }
 
-    // اگر بازی فعال وجود دارد
-    if (gameProvider.currentRoom != null && gameProvider.currentPhase != null) {
-      if (gameProvider.currentPhase == 'finished') {
-        // بازی تمام شده - نمایش پیام و رفتن به خانه
-        _showGameFinishedMessage(gameProvider.currentGameState?.winner ?? 'نامشخص');
+        // اگر کاربر لاگین نکرده باشد
+        if (!authProvider.isLoggedIn) {
+          if (kDebugMode) {
+            print('🔄 Redirecting to LoginScreen');
+          }
+          return const LoginScreen();
+        }
+
+        // اگر بازی فعال وجود دارد
+        if (gameProvider.currentRoom != null && gameProvider.currentPhase != null) {
+          if (gameProvider.currentPhase == 'finished') {
+            // بازی تمام شده - نمایش پیام و رفتن به خانه
+            _showGameFinishedMessage(gameProvider.currentGameState?.winner ?? 'نامشخص');
+            return const ScenarioSliderScreen();
+          } else {
+            // بازی هنوز فعال است - رفتن به بازی
+            return const GameScreen();
+          }
+        }
+
+        // اگر کاربر در اتاق باشد اما بازی شروع نشده باشد
+        if (gameProvider.currentRoom != null) {
+          return LobbyScreen();
+        }
+
+        // در غیر این صورت به صفحه اصلی برود
         return const ScenarioSliderScreen();
-      } else {
-        // بازی هنوز فعال است - رفتن به بازی
-        return const GameScreen();
-      }
-    }
-
-    // اگر کاربر در اتاق باشد اما بازی شروع نشده باشد
-    if (gameProvider.currentRoom != null) {
-      return LobbyScreen();
-    }
-
-    // در غیر این صورت به صفحه اصلی برود
-    return const ScenarioSliderScreen();
+      },
+    );
   }
 }
 

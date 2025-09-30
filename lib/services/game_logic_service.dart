@@ -11,10 +11,9 @@ class GameLogicService {
 
     // ایجاد لیست نقش‌ها بر اساس سناریو
     List<Role> rolesToAssign = [];
-    for (final scenarioRole in scenario.scenarioRoles) {
-      for (int i = 0; i < scenarioRole.count; i++) {
-        rolesToAssign.add(scenarioRole.role);
-      }
+    for (final role in scenario.roles) {
+      // هر نقش یک بار اضافه می‌شود (چون دیگر count نداریم)
+      rolesToAssign.add(role);
     }
 
     // بررسی تعداد نقش‌ها
@@ -89,8 +88,7 @@ class GameLogicService {
     return players.where((p) => 
       p.isAlive && 
       p.role != null && 
-      p.role!.abilities.containsKey(ability) &&
-      p.role!.abilities[ability] == true
+      p.role!.abilityName == ability
     ).toList();
   }
 
@@ -122,7 +120,7 @@ class GameLogicService {
         voteCount[votedFor] = (voteCount[votedFor] ?? 0) + 1;
         
         // رای دو برابر برای شهردار
-        if (player.role?.abilities['double_vote'] == true) {
+        if (player.role?.abilityName == 'double_vote') {
           voteCount[votedFor] = (voteCount[votedFor] ?? 0) + 1;
         }
       }
@@ -160,9 +158,9 @@ class GameLogicService {
       case 'investigate':
         return RoleAbilityService.canInvestigate(player.role!);
       case 'vote':
-        return player.role!.abilities['vote'] == true;
+        return player.role!.abilityName == 'vote';
       case 'speak':
-        return player.role!.abilities['speak'] == true;
+        return player.role!.abilityName == 'speak';
       default:
         return false;
     }

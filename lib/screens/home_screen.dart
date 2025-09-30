@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/game_provider.dart';
 import 'create_room_screen.dart';
 import 'join_room_screen.dart';
 import 'scenario_slider_screen.dart';
@@ -21,8 +22,82 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
   }
 
-  void _handleLogout() {
-    context.read<AuthProvider>().logout();
+  Future<void> _handleLogout() async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFFD700)),
+          ),
+        ),
+      );
+
+      // Clean up game state first
+      final gameProvider = context.read<GameProvider>();
+      await gameProvider.forceCleanup();
+
+      // Then logout
+      final authProvider = context.read<AuthProvider>();
+      await authProvider.logout();
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // Show success message briefly
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('با موفقیت خارج شدید'),
+            backgroundColor: Color(0xFF4CAF50),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+
+      // Wait a bit for the UI to update, then force a rebuild
+      if (mounted) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        setState(() {});
+        
+        // Force a rebuild after the frame is built
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+        
+        // If still not redirected, force navigation to login
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted && context.read<AuthProvider>().isLoggedIn == false) {
+          Navigator.pushReplacementNamed(context, '/login');
+        }
+      }
+
+      // The AuthWrapper should automatically redirect to LoginScreen
+      // due to the context.watch<AuthProvider>() in main.dart
+      
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('خطا در خروج: $e'),
+            backgroundColor: const Color(0xFF8B0000),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   @override

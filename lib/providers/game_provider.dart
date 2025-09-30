@@ -26,6 +26,9 @@ class GameProvider with ChangeNotifier {
   final List<Map<String, String>> _chatMessages = [];
   SharedPreferences? _prefs;
   Timer? _gameTimer;
+  
+  // Callback for reaction animations
+  Function(String playerUsername, String reactionType)? _onReactionReceived;
 
   List<Room> get rooms => _rooms;
   Room? get currentRoom => _currentRoom;
@@ -248,6 +251,14 @@ class GameProvider with ChangeNotifier {
         case 'game_started':
           _handleGameStarted(data);
           break;
+          
+        case 'game_reset':
+          _handleGameReset(data);
+          break;
+          
+        case 'speaking_reaction_added':
+          _handleSpeakingReaction(data);
+          break;
       }
       
     } catch (e) {
@@ -351,13 +362,39 @@ class GameProvider with ChangeNotifier {
 
   Future<void> refreshGameInfo() async {
     try {
+      print('🔄 GameProvider: Refreshing game info...');
       final gameInfo = await _gameService.getGameInfo();
+      print('📊 GameProvider: Received game info: $gameInfo');
+      
+      // Debug each field individually
+      print('🔍 Debugging JSON fields:');
+      print('  - phase: ${gameInfo['phase']} (type: ${gameInfo['phase'].runtimeType})');
+      print('  - day_number: ${gameInfo['day_number']} (type: ${gameInfo['day_number'].runtimeType})');
+      print('  - phase_time_remaining: ${gameInfo['phase_time_remaining']} (type: ${gameInfo['phase_time_remaining'].runtimeType})');
+      print('  - player_role: ${gameInfo['player_role']} (type: ${gameInfo['player_role'].runtimeType})');
+      print('  - winner: ${gameInfo['winner']} (type: ${gameInfo['winner'].runtimeType})');
+      print('  - alive_players: ${gameInfo['alive_players']} (type: ${gameInfo['alive_players'].runtimeType})');
+      
       final gameState = GameState.fromJson(gameInfo);
+      print('📊 GameProvider: Parsed game state:');
+      print('  - phase: ${gameState.phase}');
+      print('  - phaseTimeRemaining: ${gameState.phaseTimeRemaining}');
+      print('  - playerRole: ${gameState.playerRole}');
       
       _setCurrentGameState(gameState);
       _setCurrentPhase(gameState.phase);
+      
+      // Update user role from game state
+      if (gameState.playerRole != null) {
+        _userRole = gameState.playerRole;
+        print('📊 GameProvider: Updated user role to: $_userRole');
+      }
+      
+      print('✅ GameProvider: Game state updated successfully');
     } catch (e) {
       print('❌ Error refreshing game info: $e');
+      print('❌ Error type: ${e.runtimeType}');
+      print('❌ Stack trace: ${StackTrace.current}');
     }
   }
 
@@ -365,6 +402,7 @@ class GameProvider with ChangeNotifier {
     _gameTimer?.cancel();
     _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_currentRoom?.status == 'in_progress') {
+        // فقط برای بررسی نوبت صحبت تایمر داریم
         refreshGameInfo();
       } else {
         timer.cancel();
@@ -550,10 +588,24 @@ class GameProvider with ChangeNotifier {
   void _handleGameStarted(Map<String, dynamic> data) {
     try {
       final message = data['message'] as String;
-      final gameStateData = data['game_state'] as Map<String, dynamic>;
+      
+      // Check if we have game_info (new format) or game_state (old format)
+      Map<String, dynamic>? gameData;
+      if (data.containsKey('game_info')) {
+        gameData = data['game_info'] as Map<String, dynamic>;
+      } else if (data.containsKey('game_state')) {
+        gameData = data['game_state'] as Map<String, dynamic>;
+      }
       
       _addChatMessage('سیستم', message);
-      _setCurrentPhase(gameStateData['phase']);
+      
+      if (gameData != null) {
+        _setCurrentPhase(gameData['phase']);
+        // Update game state if available
+        if (gameData.containsKey('alive_players')) {
+          _currentGameState = GameState.fromJson(gameData);
+        }
+      }
       
       // Start game timer
       _startGameTimer();
@@ -562,6 +614,123 @@ class GameProvider with ChangeNotifier {
       refreshGameInfo();
     } catch (e) {
       print('❌ Error handling game started: $e');
+    }
+  }
+
+  void _handleGameReset(Map<String, dynamic> data) {
+    try {
+      print('🔄 Handling game reset WebSocket message');
+      
+      final message = data['message'] as String;
+      final gameInfo = data['game_info'] as Map<String, dynamic>;
+      
+      // ریست کردن وضعیت محلی
+      _currentGameState = null;
+      _hasVoted = false;
+      _hasNightAction = false;
+      _chatMessages.clear();
+      
+      // لغو تایمرها
+      _gameTimer?.cancel();
+      _gameTimer = null;
+      
+      // به‌روزرسانی اطلاعات جدید
+      _currentPhase = gameInfo['phase'];
+      _currentGameState = GameState.fromJson(gameInfo);
+      
+      // نمایش پیام سیستم
+      _addChatMessage('سیستم', message);
+      
+      // شروع تایمر جدید
+      _startGameTimer();
+      
+      // اطلاع به listeners
+      notifyListeners();
+      
+      print('✅ Game reset handled successfully: phase=$_currentPhase');
+      
+    } catch (e) {
+      print('❌ Error handling game reset: $e');
+    }
+  }
+
+  void _handleSpeakingReaction(Map<String, dynamic> data) {
+    try {
+      final player = data['player'] as String;
+      final targetPlayer = data['target_player'] as String;
+      final reactionType = data['reaction_type'] as String;
+      
+      print('🎭 Speaking reaction received: $player -> $targetPlayer ($reactionType)');
+      
+      // Add chat message
+      final reactionText = reactionType == 'like' ? '👍 لایک' : '👎 دیسلایک';
+      _addChatMessage('سیستم', '$player $reactionText کرد $targetPlayer');
+      
+      // Trigger animation callback if set
+      if (_onReactionReceived != null) {
+        _onReactionReceived!(targetPlayer, reactionType);
+      }
+    } catch (e) {
+      print('❌ Error handling speaking reaction: $e');
+    }
+  }
+
+  void setReactionCallback(Function(String playerUsername, String reactionType)? callback) {
+    _onReactionReceived = callback;
+  }
+
+  // ========== Debug Methods ==========
+  Future<void> resetGame() async {
+    try {
+      print('🔄 resetGame() called - Starting reset process...');
+      print('🔄 Calling reset game API...');
+      
+      // فراخوانی API ریست بازی
+      final response = await _gameService.resetGame();
+      print('🔄 Reset API response: $response');
+      
+      if (response['success'] == true) {
+        print('✅ Game reset API successful');
+        
+        // ریست کردن وضعیت محلی
+        _currentGameState = null;
+        _currentPhase = null;
+        _userRole = null;
+        _hasVoted = false;
+        _hasNightAction = false;
+        _chatMessages.clear();
+        
+        // لغو تایمرها
+        _gameTimer?.cancel();
+        _gameTimer = null;
+        
+        // پاک کردن اطلاعات ذخیره شده
+        if (_prefs != null) {
+          await _prefs!.remove('current_phase');
+          await _prefs!.remove('user_role');
+          await _prefs!.remove('game_state');
+        }
+        
+        // به‌روزرسانی اطلاعات بازی از response
+        if (response['game_info'] != null) {
+          final gameInfo = response['game_info'];
+          _currentPhase = gameInfo['phase'];
+          _currentGameState = GameState.fromJson(gameInfo);
+          print('🎮 Updated game state from API: phase=$_currentPhase');
+        }
+        
+        // اطلاع به listeners
+        notifyListeners();
+        
+        print('✅ Game reset completed successfully');
+        
+      } else {
+        throw Exception('Reset API failed: ${response['message'] ?? 'Unknown error'}');
+      }
+      
+    } catch (e) {
+      print('❌ Error resetting game: $e');
+      rethrow;
     }
   }
 

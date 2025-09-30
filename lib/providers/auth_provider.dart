@@ -153,13 +153,37 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  void logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('access_token');
-    await prefs.remove('refresh_token');
-    
-    _authData = null;
-    notifyListeners();
+  Future<void> logout() async {
+    try {
+      if (kDebugMode) {
+        print('🚪 Starting logout process...');
+      }
+      
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('access_token');
+      await prefs.remove('refresh_token');
+      
+      _authData = null;
+      _errorMessage = null;
+      
+      if (kDebugMode) {
+        print('✅ Logout successful - tokens cleared, notifying listeners...');
+      }
+      
+      notifyListeners();
+      
+      if (kDebugMode) {
+        print('✅ Listeners notified - isLoggedIn should now be false');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ Error during logout: $e');
+      }
+      // Even if there's an error, clear the auth data
+      _authData = null;
+      _errorMessage = null;
+      notifyListeners();
+    }
   }
   
   Future<void> checkStorage() async {

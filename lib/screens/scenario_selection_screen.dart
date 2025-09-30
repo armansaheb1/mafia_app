@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/scenario.dart';
 import '../services/scenario_service.dart';
-import '../services/role_ability_service.dart';
 import 'create_room_screen.dart';
 import 'scenario_detail_screen.dart';
 
@@ -187,16 +186,9 @@ class _ScenarioSelectionScreenState extends State<ScenarioSelectionScreen> {
                               '${scenario.minPlayers}-${scenario.maxPlayers} بازیکن',
                               Colors.blue,
                             ),
-                            const SizedBox(width: 8),
-                            _buildInfoChip(
-                              Icons.category,
-                              '${scenario.scenarioRoles.length} نقش',
-                              Colors.green,
-                            ),
                           ],
                         ),
                         const SizedBox(height: 8),
-                        _buildRolesPreview(scenario),
                       ],
                     ),
                   ),
@@ -293,128 +285,4 @@ class _ScenarioSelectionScreenState extends State<ScenarioSelectionScreen> {
     );
   }
 
-  Widget _buildRolesPreview(Scenario scenario) {
-    final townRoles = ScenarioService.getTownRoles(scenario);
-    final mafiaRoles = ScenarioService.getMafiaRoles(scenario);
-    final neutralRoles = ScenarioService.getNeutralRoles(scenario);
-    final specialRoles = ScenarioService.getSpecialRoles(scenario);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 4,
-          runSpacing: 4,
-          children: [
-            if (townRoles.isNotEmpty)
-              _buildRoleChip('شهر', townRoles.length, Colors.blue),
-            if (mafiaRoles.isNotEmpty)
-              _buildRoleChip('مافیا', mafiaRoles.length, Colors.red),
-            if (neutralRoles.isNotEmpty)
-              _buildRoleChip('خنثی', neutralRoles.length, Colors.orange),
-            if (specialRoles.isNotEmpty)
-              _buildRoleChip('ویژه', specialRoles.length, Colors.purple),
-          ],
-        ),
-        const SizedBox(height: 8),
-        _buildDetailedRolesList(scenario),
-      ],
-    );
-  }
-
-  Widget _buildDetailedRolesList(Scenario scenario) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'نقش‌های این سناریو:',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            children: scenario.scenarioRoles.map((scenarioRole) {
-              final role = scenarioRole.role;
-              final color = _getRoleColor(role.roleType);
-              return _buildRoleDetailChip(
-                role.displayName,
-                scenarioRole.count,
-                color,
-                RoleAbilityService.getRoleIcon(role),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getRoleColor(String roleType) {
-    switch (roleType) {
-      case 'town':
-        return Colors.blue;
-      case 'mafia':
-        return Colors.red;
-      case 'neutral':
-        return Colors.orange;
-      case 'special':
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  Widget _buildRoleDetailChip(String roleName, int count, Color color, String icon) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(icon, style: const TextStyle(fontSize: 12)),
-          const SizedBox(width: 2),
-          Text(
-            '$roleName ($count)',
-            style: TextStyle(
-              fontSize: 10,
-              color: color,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRoleChip(String type, int count, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Text(
-        '$type ($count)',
-        style: TextStyle(
-          fontSize: 10,
-          color: color,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
 }

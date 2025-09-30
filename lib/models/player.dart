@@ -28,16 +28,40 @@ class Player {
   });
 
   factory Player.fromJson(Map<String, dynamic> json) {
+    print('🔍 Player.fromJson: Parsing player ${json['username']}...');
+    print('  - role field: ${json['role']} (type: ${json['role'].runtimeType})');
+    
+    // Handle role field - it might be a string or a map
+    Role? role;
+    if (json['role'] != null) {
+      if (json['role'] is String) {
+        // If role is a string, create a simple Role object
+        role = Role(
+          id: 0,
+          name: json['role'].toLowerCase().replaceAll(' ', '_'),
+          displayName: json['role'],
+          roleType: 'unknown',
+          description: '',
+          abilityName: null,
+          nightActionOrder: 0,
+          isActive: true,
+        );
+      } else if (json['role'] is Map<String, dynamic>) {
+        // If role is a map, parse it normally
+        role = Role.fromJson(json['role']);
+      }
+    }
+    
     return Player(
-      id: json['id'],
-      userId: json['user'],
-      username: json['username'],
-      roomId: json['room'],
-      role: json['role'] != null ? Role.fromJson(json['role']) : null,
-      isAlive: json['is_alive'],
-      isReady: json['is_ready'],
-      joinedAt: DateTime.parse(json['joined_at']),
-      votesReceived: json['votes_received'] ?? 0,
+      id: (json['id'] as int?) ?? 0,
+      userId: (json['user'] as int?) ?? 0,
+      username: json['username'] ?? 'Unknown',
+      roomId: (json['room'] as int?) ?? 0,
+      role: role,
+      isAlive: json['is_alive'] ?? true,
+      isReady: json['is_ready'] ?? false,
+      joinedAt: json['joined_at'] != null ? DateTime.parse(json['joined_at']) : DateTime.now(),
+      votesReceived: (json['votes_received'] as int?) ?? 0,
       isProtected: json['is_protected'] ?? false,
       specialActionsUsed: Map<String, dynamic>.from(json['special_actions_used'] ?? {}),
     );

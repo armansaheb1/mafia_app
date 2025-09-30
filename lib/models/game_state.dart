@@ -20,16 +20,43 @@ class GameState {
   });
 
   factory GameState.fromJson(Map<String, dynamic> json) {
+    print('🔍 GameState.fromJson: Parsing JSON...');
+    
+    // Debug each field
+    final phase = json['phase'] ?? 'waiting';
+    print('  - phase: $phase');
+    
+    final dayNumberRaw = json['day_number'];
+    final dayNumber = (dayNumberRaw as int?) ?? 1;
+    print('  - day_number: $dayNumberRaw -> $dayNumber');
+    
+    final winner = json['winner'];
+    print('  - winner: $winner');
+    
+    final alivePlayersRaw = json['alive_players'];
+    final players = (alivePlayersRaw as List? ?? [])
+        .map((playerJson) => Player.fromJson(playerJson))
+        .toList();
+    print('  - alive_players: ${players.length} players');
+    
+    final votes = Map<String, dynamic>.from(json['votes'] ?? {});
+    print('  - votes: $votes');
+    
+    final phaseTimeRemainingRaw = json['phase_time_remaining'];
+    final phaseTimeRemaining = (phaseTimeRemainingRaw as int?) ?? 0;
+    print('  - phase_time_remaining: $phaseTimeRemainingRaw -> $phaseTimeRemaining');
+    
+    final playerRole = json['player_role'];
+    print('  - player_role: $playerRole');
+    
     return GameState(
-      phase: json['phase'] ?? 'waiting',
-      dayNumber: json['day_number'] ?? 1,
-      winner: json['winner'],
-      players: (json['alive_players'] as List? ?? [])
-          .map((playerJson) => Player.fromJson(playerJson))
-          .toList(),
-      votes: Map<String, dynamic>.from(json['votes'] ?? {}),
-      phaseTimeRemaining: json['phase_time_remaining'] ?? 0,
-      playerRole: json['player_role'],
+      phase: phase,
+      dayNumber: dayNumber,
+      winner: winner,
+      players: players,
+      votes: votes,
+      phaseTimeRemaining: phaseTimeRemaining,
+      playerRole: playerRole,
     );
   }
 

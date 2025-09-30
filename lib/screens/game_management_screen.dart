@@ -21,7 +21,7 @@ class GameManagementScreen extends StatefulWidget {
 class _GameManagementScreenState extends State<GameManagementScreen> {
   List<Player> _players = [];
   String _currentPhase = 'night';
-  int _dayNumber = 1;
+  final int _dayNumber = 1;
   String? _winner;
 
   @override
@@ -56,8 +56,8 @@ class _GameManagementScreenState extends State<GameManagementScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildInfoCard('روز', '$_dayNumber', Icons.wb_sunny),
-                _buildInfoCard('فاز', _currentPhase == 'night' ? 'شب' : 'روز', 
-                  _currentPhase == 'night' ? Icons.nightlight : Icons.wb_sunny),
+                _buildInfoCard('فاز', (_currentPhase == 'night' || _currentPhase == 'mafia_night') ? 'شب' : 'روز', 
+                  (_currentPhase == 'night' || _currentPhase == 'mafia_night') ? Icons.nightlight : Icons.wb_sunny),
                 _buildInfoCard('زنده', '${gameInfo['alive_players']}', Icons.people),
                 _buildInfoCard('مافیا', '${gameInfo['mafia_count']}', Icons.dangerous),
               ],
@@ -167,7 +167,7 @@ class _GameManagementScreenState extends State<GameManagementScreen> {
     final role = player.role;
     final isAlive = player.isAlive;
     final roleColor = role != null ? _getRoleColor(role.roleType) : Colors.grey;
-    final roleIcon = role != null ? RoleAbilityService.getRoleIcon(role) : '❓';
+    final roleIcon = role != null ? RoleAbilityService.getRoleIcon(role) : Icons.help;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -175,9 +175,10 @@ class _GameManagementScreenState extends State<GameManagementScreen> {
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: isAlive ? roleColor : Colors.grey,
-          child: Text(
+          child: Icon(
             roleIcon,
-            style: const TextStyle(fontSize: 20),
+            color: Colors.white,
+            size: 20,
           ),
         ),
         title: Text(

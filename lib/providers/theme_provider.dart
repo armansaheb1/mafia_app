@@ -10,12 +10,12 @@ class ThemeProvider extends ChangeNotifier {
 
   // تصاویر پس‌زمینه کل اپ برای هر سناریو
   final Map<String, String> appBackgrounds = {
-    'شب‌های مافیا (کلاسیک تلویزیونی)': 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=1920&h=1080&fit=crop',
-    'پدرخوانده (Godfather Show)': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop',
-    'شب‌های مافیا (با فراماسون‌ها)': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop',
-    'نسخه اینترنتی (10 نفره)': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop',
-    'کلاسیک ساده': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop',
-    'تیم بزرگ پیشرفته': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop',
+    'شب‌های مافیا (کلاسیک تلویزیونی)': 'https://picsum.photos/1920/1080?random=1',
+    'پدرخوانده (Godfather Show)': 'https://picsum.photos/1920/1080?random=2',
+    'شب‌های مافیا (با فراماسون‌ها)': 'https://picsum.photos/1920/1080?random=3',
+    'نسخه اینترنتی (10 نفره)': 'https://picsum.photos/1920/1080?random=4',
+    'کلاسیک ساده': 'https://picsum.photos/1920/1080?random=5',
+    'تیم بزرگ پیشرفته': 'https://picsum.photos/1920/1080?random=6',
   };
 
   void updateBackground(String scenarioNameOrUrl) {

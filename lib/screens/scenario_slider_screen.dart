@@ -28,12 +28,12 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
 
   // تصاویر پس‌زمینه کل اپ برای هر سناریو (ابعاد بهینه 1920x1080)
   final Map<String, String> appBackgrounds = {
-    'شب‌های مافیا (کلاسیک تلویزیونی)': 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=1920&h=1080&fit=crop&q=80',
-    'پدرخوانده (Godfather Show)': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop&q=80',
-    'شب‌های مافیا (با فراماسون‌ها)': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop&q=80',
-    'نسخه اینترنتی (10 نفره)': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop&q=80',
-    'کلاسیک ساده': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop&q=80',
-    'تیم بزرگ پیشرفته': 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop&q=80',
+    'شب‌های مافیا (کلاسیک تلویزیونی)': 'https://picsum.photos/1920/1080?random=1',
+    'پدرخوانده (Godfather Show)': 'https://picsum.photos/1920/1080?random=2',
+    'شب‌های مافیا (با فراماسون‌ها)': 'https://picsum.photos/1920/1080?random=3',
+    'نسخه اینترنتی (10 نفره)': 'https://picsum.photos/1920/1080?random=4',
+    'کلاسیک ساده': 'https://picsum.photos/1920/1080?random=5',
+    'تیم بزرگ پیشرفته': 'https://picsum.photos/1920/1080?random=6',
   };
 
   @override
@@ -156,7 +156,7 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
       } else {
         // عکس‌های پیش‌فرض با ابعاد بهینه
         backgroundUrl = appBackgrounds[scenario.name] ?? 
-            'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=1920&h=1080&fit=crop&q=80';
+            'https://picsum.photos/1920/1080?random=0';
       }
       
       print('🖼️ Updating background for scenario: ${scenario.name}');
@@ -555,12 +555,6 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
                     '${scenario.minPlayers}-${scenario.maxPlayers} بازیکن',
                     const Color(0xFF4CAF50),
                   ),
-                  const SizedBox(width: 16),
-                  _buildStatChip(
-                    Icons.category,
-                    '${scenario.scenarioRoles.length} نقش',
-                    const Color(0xFF2196F3),
-                  ),
                 ],
               ),
               
@@ -800,8 +794,82 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
     });
   }
 
-  void _handleLogout() {
-    context.read<AuthProvider>().logout();
+  Future<void> _handleLogout() async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFFD700)),
+          ),
+        ),
+      );
+
+      // Clean up game state first
+      final gameProvider = context.read<GameProvider>();
+      await gameProvider.forceCleanup();
+
+      // Then logout
+      final authProvider = context.read<AuthProvider>();
+      await authProvider.logout();
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // Show success message briefly
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('با موفقیت خارج شدید'),
+            backgroundColor: Color(0xFF4CAF50),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+
+      // Wait a bit for the UI to update, then force a rebuild
+      if (mounted) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        setState(() {});
+        
+        // Force a rebuild after the frame is built
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+        
+        // If still not redirected, force navigation to login
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted && context.read<AuthProvider>().isLoggedIn == false) {
+          Navigator.pushReplacementNamed(context, '/login');
+        }
+      }
+
+      // The AuthWrapper should automatically redirect to LoginScreen
+      // due to the context.watch<AuthProvider>() in main.dart
+      
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('خطا در خروج: $e'),
+            backgroundColor: const Color(0xFF8B0000),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   @override

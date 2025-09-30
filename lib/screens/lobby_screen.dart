@@ -23,7 +23,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
   bool _isWebSocketConnected = false;
   String? _connectionError;
   List<Map<String, dynamic>> _players = [];
-  List<Map<String, String>> _chatMessages = [];
+  final List<Map<String, String>> _chatMessages = [];
   StreamSubscription? _webSocketSubscription;
 
   @override
@@ -569,7 +569,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
               Switch(
                 value: _isReady,
                 onChanged: _isWebSocketConnected ? (value) => _toggleReady() : null,
-                activeColor: const Color(0xFFFFD700),
+                activeThumbColor: const Color(0xFFFFD700),
                 activeTrackColor: const Color(0xFF8B0000).withOpacity(0.5),
                 inactiveThumbColor: const Color(0xFF404040),
                 inactiveTrackColor: const Color(0xFF404040).withOpacity(0.3),
@@ -985,7 +985,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'برای شروع بازی حداقل 4 بازیکن آماده نیاز است (${readyPlayers}/${totalPlayers})',
+                      'برای شروع بازی حداقل 4 بازیکن آماده نیاز است ($readyPlayers/$totalPlayers)',
                       style: const TextStyle(
                         color: Color(0xFFFFD700),
                         fontSize: 14,

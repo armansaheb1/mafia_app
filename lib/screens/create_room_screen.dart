@@ -185,7 +185,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                                     const SizedBox(width: 8),
                                     _buildInfoChip(
                                       Icons.category,
-                                      '${_selectedScenario!.scenarioRoles.length} نقش',
+                                      '${_selectedScenario!.roles.length} نقش',
                                       Colors.green,
                                     ),
                                   ],
@@ -293,7 +293,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                               const SizedBox(width: 8),
                               _buildInfoChip(
                                 Icons.category,
-                                '${_defaultScenario!.scenarioRoles.length} نقش',
+                                '${_defaultScenario!.roles.length} نقش',
                                 Colors.green,
                               ),
                             ],
@@ -323,7 +323,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int>(
-                  value: _getPlayerCountOptions().contains(_maxPlayers) ? _maxPlayers : null,
+                  initialValue: _getPlayerCountOptions().contains(_maxPlayers) ? _maxPlayers : null,
                   decoration: const InputDecoration(
                     labelText: 'تعداد بازیکنان',
                     border: OutlineInputBorder(),

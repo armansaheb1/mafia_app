@@ -216,7 +216,7 @@ class GameService {
   }
 
   // API های سیستم صحبت
-  Future<void> startSpeaking() async {
+  Future<Map<String, dynamic>> startSpeaking() async {
     final headers = await _getHeaders();
     
     final response = await http.post(
@@ -224,7 +224,9 @@ class GameService {
       headers: headers,
     );
 
-    if (response.statusCode != 200) {
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
       throw Exception('Failed to start speaking: ${response.statusCode} - ${response.body}');
     }
   }
@@ -347,4 +349,43 @@ class GameService {
       throw Exception('Failed to start game: ${response.statusCode} - ${response.body}');
     }
   }
+
+  Future<Map<String, dynamic>> resetGame() async {
+    print('🔄 GameService.resetGame() called');
+    final headers = await _getHeaders();
+    print('🔄 Headers: $headers');
+    
+    try {
+      final url = '${_baseUrl}reset/';
+      print('🔄 Making POST request to: $url');
+      final response = await http.post(
+        Uri.parse(url),
+        headers: headers,
+      );
+      print('🔄 Response status: ${response.statusCode}');
+      print('🔄 Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        return {
+          'success': true,
+          'message': responseData['message'],
+          'game_info': responseData['game_info'],
+        };
+      } else {
+        final errorData = json.decode(response.body);
+        return {
+          'success': false,
+          'message': errorData['error'] ?? 'Reset failed',
+        };
+      }
+    } catch (e) {
+      print('❌ Error calling reset API: $e');
+      return {
+        'success': false,
+        'message': 'Network error: $e',
+      };
+    }
+  }
+
 }

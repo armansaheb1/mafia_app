@@ -51,7 +51,7 @@ class ScenarioDetailScreen extends StatelessWidget {
                         const SizedBox(width: 8),
                         _buildInfoChip(
                           Icons.category,
-                          '${scenario.scenarioRoles.length} نقش',
+                          '${scenario.roles.length} نقش',
                           Colors.green,
                         ),
                       ],
@@ -111,10 +111,10 @@ class ScenarioDetailScreen extends StatelessWidget {
   }
 
   List<Widget> _buildRolesByType() {
-    final rolesByType = <String, List<ScenarioRole>>{};
+    final rolesByType = <String, List<Role>>{};
     
-    for (final scenarioRole in scenario.scenarioRoles) {
-      final roleType = scenarioRole.role.roleType;
+    for (final scenarioRole in scenario.roles) {
+      final roleType = scenarioRole.roleType;
       if (!rolesByType.containsKey(roleType)) {
         rolesByType[roleType] = [];
       }
@@ -133,7 +133,7 @@ class ScenarioDetailScreen extends StatelessWidget {
     ];
   }
 
-  Widget _buildRoleTypeSection(String title, List<ScenarioRole> roles, Color color) {
+  Widget _buildRoleTypeSection(String title, List<Role> roles, Color color) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -152,8 +152,8 @@ class ScenarioDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildRoleCard(ScenarioRole scenarioRole, Color color) {
-    final role = scenarioRole.role;
+  Widget _buildRoleCard(Role scenarioRole, Color color) {
+    final role = scenarioRole;
     final icon = RoleAbilityService.getRoleIcon(role);
     final abilities = RoleAbilityService.getAbilityDescription(role);
 
@@ -167,11 +167,11 @@ class ScenarioDetailScreen extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text(icon, style: const TextStyle(fontSize: 20)),
+                Icon(icon, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${role.displayName} (${scenarioRole.count} نفر)',
+                    '${role.displayName} (${1} نفر)',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,

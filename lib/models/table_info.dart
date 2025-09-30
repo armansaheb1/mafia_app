@@ -1,5 +1,4 @@
 // lib/models/table_info.dart
-import 'player.dart';
 
 class SeatPosition {
   final double x; // موقعیت X (0.0 تا 1.0)
@@ -62,6 +61,20 @@ class PlayerSeat {
       reactions: Map<String, int>.from(json['reactions'] ?? {}),
     );
   }
+  
+  // Factory method that takes currentSpeaker into account
+  factory PlayerSeat.fromJsonWithSpeaker(Map<String, dynamic> json, String? currentSpeakerUsername) {
+    return PlayerSeat(
+      id: json['id'],
+      username: json['username'],
+      role: json['role'],
+      isAlive: json['is_alive'] ?? true,
+      avatarUrl: json['avatar_url'],
+      seatPosition: SeatPosition.fromJson(json['seat_position'] ?? {}),
+      isSpeaking: json['is_speaking'] ?? (currentSpeakerUsername == json['username']),
+      reactions: Map<String, int>.from(json['reactions'] ?? {}),
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -93,15 +106,20 @@ class GameTableInfo {
   });
 
   factory GameTableInfo.fromJson(Map<String, dynamic> json) {
+    final currentSpeaker = json['current_speaker'] != null
+        ? CurrentSpeaker.fromJson(json['current_speaker'])
+        : null;
+    
     return GameTableInfo(
       tableImageUrl: json['table_image_url'],
       scenarioName: json['scenario_name'] ?? '',
       players: (json['players'] as List<dynamic>? ?? [])
-          .map((playerJson) => PlayerSeat.fromJson(playerJson))
+          .map((playerJson) => PlayerSeat.fromJsonWithSpeaker(
+                playerJson, 
+                currentSpeaker?.username
+              ))
           .toList(),
-      currentSpeaker: json['current_speaker'] != null
-          ? CurrentSpeaker.fromJson(json['current_speaker'])
-          : null,
+      currentSpeaker: currentSpeaker,
       speakingQueue: SpeakingQueue.fromJson(json['speaking_queue'] ?? {}),
     );
   }

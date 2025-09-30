@@ -7,7 +7,7 @@ class Scenario {
   final bool isActive;
   final String? image;
   final String? imageUrl;
-  final List<ScenarioRole> scenarioRoles;
+  final List<Role> roles;
 
   Scenario({
     required this.id,
@@ -18,7 +18,7 @@ class Scenario {
     required this.isActive,
     this.image,
     this.imageUrl,
-    required this.scenarioRoles,
+    required this.roles,
   });
 
   factory Scenario.fromJson(Map<String, dynamic> json) {
@@ -31,8 +31,8 @@ class Scenario {
       isActive: json['is_active'],
       image: json['image'],
       imageUrl: json['image_url'],
-      scenarioRoles: (json['scenario_roles'] as List? ?? [])
-          .map((roleJson) => ScenarioRole.fromJson(roleJson))
+      roles: (json['roles'] as List? ?? [])
+          .map((roleJson) => Role.fromJson(roleJson))
           .toList(),
     );
   }
@@ -47,42 +47,18 @@ class Scenario {
       'is_active': isActive,
       'image': image,
       'image_url': imageUrl,
-      'scenario_roles': scenarioRoles.map((role) => role.toJson()).toList(),
+      'roles': roles.map((role) => role.toJson()).toList(),
     };
   }
+
+  // Helper methods
+  int get roleCount => roles.length;
+  int get townRoleCount => roles.where((role) => role.isTown).length;
+  int get mafiaRoleCount => roles.where((role) => role.isMafia).length;
+  int get neutralRoleCount => roles.where((role) => role.isNeutral).length;
+  int get activeRoleCount => roles.where((role) => role.isActive).length;
 }
 
-class ScenarioRole {
-  final int id;
-  final Role role;
-  final int count;
-  final bool isRequired;
-
-  ScenarioRole({
-    required this.id,
-    required this.role,
-    required this.count,
-    required this.isRequired,
-  });
-
-  factory ScenarioRole.fromJson(Map<String, dynamic> json) {
-    return ScenarioRole(
-      id: json['id'],
-      role: Role.fromJson(json['role']),
-      count: json['count'],
-      isRequired: json['is_required'],
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'role': role.toJson(),
-      'count': count,
-      'is_required': isRequired,
-    };
-  }
-}
 
 class Role {
   final int id;
@@ -90,7 +66,9 @@ class Role {
   final String displayName;
   final String roleType;
   final String description;
-  final Map<String, dynamic> abilities;
+  final String? abilityName;
+  final int nightActionOrder;
+  final bool isActive;
 
   Role({
     required this.id,
@@ -98,17 +76,23 @@ class Role {
     required this.displayName,
     required this.roleType,
     required this.description,
-    required this.abilities,
+    this.abilityName,
+    required this.nightActionOrder,
+    required this.isActive,
   });
 
   factory Role.fromJson(Map<String, dynamic> json) {
+    print('🔍 Role.fromJson: Parsing role ${json['display_name']}...');
+    
     return Role(
-      id: json['id'],
-      name: json['name'],
-      displayName: json['display_name'],
-      roleType: json['role_type'],
-      description: json['description'],
-      abilities: Map<String, dynamic>.from(json['abilities'] ?? {}),
+      id: (json['id'] as int?) ?? 0,
+      name: json['name'] ?? 'Unknown',
+      displayName: json['display_name'] ?? 'Unknown',
+      roleType: json['role_type'] ?? 'town',
+      description: json['description'] ?? '',
+      abilityName: json['ability_name'],
+      nightActionOrder: json['night_action_order'] ?? 0,
+      isActive: json['is_active'] ?? true,
     );
   }
 
@@ -119,7 +103,9 @@ class Role {
       'display_name': displayName,
       'role_type': roleType,
       'description': description,
-      'abilities': abilities,
+      'ability_name': abilityName,
+      'night_action_order': nightActionOrder,
+      'is_active': isActive,
     };
   }
 
@@ -128,4 +114,6 @@ class Role {
   bool get isMafia => roleType == 'mafia';
   bool get isNeutral => roleType == 'neutral';
   bool get isSpecial => roleType == 'special';
+  bool get hasNightAction => nightActionOrder > 0;
+  bool get hasAbility => abilityName != null && abilityName!.isNotEmpty;
 }

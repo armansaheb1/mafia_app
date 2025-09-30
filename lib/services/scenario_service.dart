@@ -76,30 +76,30 @@ class ScenarioService {
   }
 
   // دریافت نقش‌های شهروندان در یک سناریو
-  static List<ScenarioRole> getTownRoles(Scenario scenario) {
-    return scenario.scenarioRoles
-        .where((scenarioRole) => scenarioRole.role.isTown)
+  static List<Role> getTownRoles(Scenario scenario) {
+    return scenario.roles
+        .where((role) => role.isTown)
         .toList();
   }
 
   // دریافت نقش‌های مافیا در یک سناریو
-  static List<ScenarioRole> getMafiaRoles(Scenario scenario) {
-    return scenario.scenarioRoles
-        .where((scenarioRole) => scenarioRole.role.isMafia)
+  static List<Role> getMafiaRoles(Scenario scenario) {
+    return scenario.roles
+        .where((role) => role.isMafia)
         .toList();
   }
 
   // دریافت نقش‌های خنثی در یک سناریو
-  static List<ScenarioRole> getNeutralRoles(Scenario scenario) {
-    return scenario.scenarioRoles
-        .where((scenarioRole) => scenarioRole.role.isNeutral)
+  static List<Role> getNeutralRoles(Scenario scenario) {
+    return scenario.roles
+        .where((role) => role.isNeutral)
         .toList();
   }
 
   // دریافت نقش‌های ویژه در یک سناریو
-  static List<ScenarioRole> getSpecialRoles(Scenario scenario) {
-    return scenario.scenarioRoles
-        .where((scenarioRole) => scenarioRole.role.isSpecial)
+  static List<Role> getSpecialRoles(Scenario scenario) {
+    return scenario.roles
+        .where((role) => role.isSpecial)
         .toList();
   }
 }
