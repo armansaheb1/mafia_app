@@ -5,7 +5,7 @@ import 'auth_service.dart';
 
 class RoomService {
   final AuthService _authService = AuthService();
-  static const String baseUrl = 'http://10.0.2.2:8000/api/game';
+  static const String baseUrl = 'http://172.20.10.10:8000/api/game';
 
   Future<Map<String, dynamic>> _makeRequest(
     String endpoint, {

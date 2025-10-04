@@ -5,6 +5,7 @@ import 'dart:async';
 import '../providers/game_provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/websocket_service.dart';
+import '../utils/snackbar_helper.dart';
 
 class LobbyScreen extends StatefulWidget {
   const LobbyScreen({super.key});
@@ -25,11 +26,34 @@ class _LobbyScreenState extends State<LobbyScreen> {
   List<Map<String, dynamic>> _players = [];
   final List<Map<String, String>> _chatMessages = [];
   StreamSubscription? _webSocketSubscription;
+  
+  // Countdown variables
+  int _countdownSeconds = 0;
+  bool _isCountdownActive = false;
+  Timer? _countdownTimer;
 
   @override
   void initState() {
     super.initState();
     _setupWebSocket();
+    
+    // Check if countdown should start automatically
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _checkAndStartCountdown();
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Check if countdown should start automatically when players change
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _checkAndStartCountdown();
+      }
+    });
   }
 
   Future<void> _setupWebSocket() async {
@@ -131,6 +155,18 @@ class _LobbyScreenState extends State<LobbyScreen> {
           }
           break;
           
+        case 'countdown_start':
+          _handleCountdownStart(data);
+          break;
+          
+        case 'countdown_update':
+          _handleCountdownUpdate(data);
+          break;
+          
+        case 'countdown_cancelled':
+          _handleCountdownCancelled(data);
+          break;
+          
         case 'game_started':
           _handleGameStarted(data);
           break;
@@ -166,6 +202,13 @@ class _LobbyScreenState extends State<LobbyScreen> {
       _addChatMessage('سیستم', data['message']);
     }
     print('✅ Updated players list: ${_players.length} players');
+    
+    // Check if countdown should start automatically after lobby update
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _checkAndStartCountdown();
+      }
+    });
   }
 
   void _handlePlayerReady(Map<String, dynamic> data) {
@@ -182,6 +225,11 @@ class _LobbyScreenState extends State<LobbyScreen> {
     }
     
     _addChatMessage('سیستم', '$username ${isReady ? 'آماده' : 'آماده نیست'} شد');
+    
+    // Check if countdown should start automatically after player ready status change
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAndStartCountdown();
+    });
   }
 
   void _handleChatMessage(Map<String, dynamic> data) {
@@ -203,16 +251,66 @@ class _LobbyScreenState extends State<LobbyScreen> {
     _scrollChatToBottom();
   }
 
+  void _handleCountdownStart(Map<String, dynamic> data) {
+    final seconds = data['seconds'] as int;
+    final message = data['message'] as String;
+    
+    if (mounted) {
+      setState(() {
+        _countdownSeconds = seconds;
+        _isCountdownActive = true;
+      });
+    }
+    
+    _addChatMessage('سیستم', message);
+    _startCountdownTimer();
+  }
+
+  void _handleCountdownUpdate(Map<String, dynamic> data) {
+    final seconds = data['seconds'] as int;
+    final message = data['message'] as String;
+    
+    if (mounted) {
+      setState(() {
+        _countdownSeconds = seconds;
+      });
+    }
+    
+    _addChatMessage('سیستم', message);
+  }
+
+  void _handleCountdownCancelled(Map<String, dynamic> data) {
+    final message = data['message'] as String;
+    
+    if (mounted) {
+      setState(() {
+        _isCountdownActive = false;
+        _countdownSeconds = 0;
+      });
+    }
+    
+    _addChatMessage('سیستم', message);
+    _stopCountdownTimer();
+  }
+
   void _handleGameStarted(Map<String, dynamic> data) {
     final message = data['message'] as String;
     _addChatMessage('سیستم', message);
     
-    // Navigate to game screen after a short delay
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/game');
-      }
-    });
+    // Stop countdown timer
+    _stopCountdownTimer();
+    
+    if (mounted) {
+      setState(() {
+        _isCountdownActive = false;
+        _countdownSeconds = 0;
+      });
+    }
+    
+    // Navigate to game table screen immediately
+    if (mounted) {
+      Navigator.pushReplacementNamed(context, '/game-table');
+    }
   }
 
   void _scrollChatToBottom() {
@@ -288,10 +386,81 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
   void _showSnackBar(String message) {
     if (mounted && !_isDisposed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      SnackBarHelper.showInfoSnackBar(context, message);
     }
+  }
+
+  void _startCountdownTimer() {
+    _stopCountdownTimer(); // Stop any existing timer
+    
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted && _isCountdownActive && _countdownSeconds > 0) {
+        setState(() {
+          _countdownSeconds--;
+        });
+        
+        if (_countdownSeconds <= 0) {
+          _stopCountdownTimer();
+          _startGameAfterCountdown();
+        }
+      } else {
+        _stopCountdownTimer();
+      }
+    });
+  }
+
+  void _stopCountdownTimer() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+  }
+
+  void _startGameAfterCountdown() {
+    print('🎮 Starting game after countdown...');
+    
+    // ارسال پیام WebSocket برای شروع بازی
+    _webSocketService.sendMessage('start_game', '');
+    
+    // اضافه کردن پیام به چت
+    _addChatMessage('سیستم', 'بازی شروع شد!');
+    
+    // Navigate to game table screen
+    if (mounted) {
+      Navigator.pushReplacementNamed(context, '/game-table');
+    }
+  }
+
+  void _checkAndStartCountdown() {
+    if (!mounted) return; // Check if widget is still mounted
+    
+    final gameProvider = Provider.of<GameProvider>(context, listen: false);
+    final players = gameProvider.currentPlayers;
+    
+    if (players.length >= 4) {
+      final readyPlayers = players.where((player) => player.isReady).length;
+      if (readyPlayers >= 4 && !_isCountdownActive) {
+        // Start countdown automatically
+        _startAutoCountdown();
+      }
+    }
+  }
+
+  void _startAutoCountdown() {
+    if (!mounted) return; // Check if widget is still mounted
+    
+    setState(() {
+      _countdownSeconds = 5; // 5 seconds countdown
+      _isCountdownActive = true;
+    });
+    
+    _addChatMessage('سیستم', 'همه بازیکنان آماده هستند! بازی در 5 ثانیه شروع می‌شود...');
+    _startCountdownTimer();
+    
+    // Start the game after countdown
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted && _isCountdownActive) {
+        _startGame();
+      }
+    });
   }
 
   @override
@@ -301,6 +470,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
     // Cancel WebSocket subscription
     _webSocketSubscription?.cancel();
     _webSocketSubscription = null;
+    
+    // Stop countdown timer
+    _stopCountdownTimer();
     
     _chatController.dispose();
     _scrollController.dispose();
@@ -331,18 +503,19 @@ class _LobbyScreenState extends State<LobbyScreen> {
           ),
         ],
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF1a1a1a),
-              Color(0xFF2C2C2C),
-            ],
+      body: SafeArea(
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFF1a1a1a),
+                Color(0xFF2C2C2C),
+              ],
+            ),
           ),
-        ),
-        child: Column(
+          child: Column(
           children: [
             // اطلاعات اتاق
             _buildRoomInfoCard(gameProvider),
@@ -356,6 +529,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
             
             // دکمه شروع بازی
             _buildStartGameButtonInline(),
+            
+            // شمارنده شروع بازی
+            if (_isCountdownActive)
+              _buildCountdownCard(),
             
             // محتوای اصلی
             Expanded(
@@ -383,6 +560,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
               ),
             ),
           ],
+        ),
         ),
       ),
     );
@@ -1076,12 +1254,89 @@ class _LobbyScreenState extends State<LobbyScreen> {
       final gameProvider = Provider.of<GameProvider>(context, listen: false);
       await gameProvider.startGame();
       
-      // Navigate to game screen after successful start
+      // Navigate to game table screen after successful start
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/game');
+        Navigator.pushReplacementNamed(context, '/game-table');
       }
     } catch (e) {
       _showError('خطا در شروع بازی: $e');
     }
+  }
+
+  Widget _buildCountdownCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFF4CAF50),
+            Color(0xFF2E7D32),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF4CAF50).withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.timer,
+                color: Colors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'بازی در حال شروع...',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.white,
+                width: 3,
+              ),
+            ),
+            child: Center(
+              child: Text(
+                '$_countdownSeconds',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'ثانیه',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

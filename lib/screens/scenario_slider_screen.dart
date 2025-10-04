@@ -56,10 +56,12 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
     try {
       final loadedScenarios = await ScenarioService.getScenarios();
       
-      setState(() {
-        scenarios = loadedScenarios;
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          scenarios = loadedScenarios;
+          isLoading = false;
+        });
+      }
       
       // بارگذاری روم‌ها پس از بارگذاری سناریوها
       await _loadRoomsForAllScenarios();
@@ -69,10 +71,12 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
         setState(() {});
       }
     } catch (e) {
-      setState(() {
-        error = e.toString();
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          error = e.toString();
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -92,9 +96,11 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
         }
       }
       
-      setState(() {
-        scenarioRooms = roomsByScenario;
-      });
+      if (mounted) {
+        setState(() {
+          scenarioRooms = roomsByScenario;
+        });
+      }
     } catch (e) {
       print('خطا در بارگذاری اتاق‌ها: $e');
     }
@@ -133,9 +139,11 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
 
   void _onPageChanged(int index) {
     final actualIndex = index % scenarios.length;
-    setState(() {
-      currentIndex = actualIndex;
-    });
+    if (mounted) {
+      setState(() {
+        currentIndex = actualIndex;
+      });
+    }
     _saveLastScenario(actualIndex);
     _updateAppBackground();
   }
@@ -797,15 +805,17 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
   Future<void> _handleLogout() async {
     try {
       // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFFD700)),
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFFD700)),
+            ),
           ),
-        ),
-      );
+        );
+      }
 
       // Clean up game state first
       final gameProvider = context.read<GameProvider>();
@@ -834,7 +844,9 @@ class _ScenarioSliderScreenState extends State<ScenarioSliderScreen> {
       // Wait a bit for the UI to update, then force a rebuild
       if (mounted) {
         await Future.delayed(const Duration(milliseconds: 100));
-        setState(() {});
+        if (mounted) {
+          setState(() {});
+        }
         
         // Force a rebuild after the frame is built
         WidgetsBinding.instance.addPostFrameCallback((_) {

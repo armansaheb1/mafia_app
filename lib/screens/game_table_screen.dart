@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/game_provider.dart';
 import '../providers/auth_provider.dart';
 import '../models/table_info.dart';
+import '../models/player.dart';
 import '../services/game_service.dart';
+import '../utils/snackbar_helper.dart';
 
 class GameTableScreen extends StatefulWidget {
   const GameTableScreen({super.key});
@@ -14,13 +17,14 @@ class GameTableScreen extends StatefulWidget {
 }
 
 class _GameTableScreenState extends State<GameTableScreen> with TickerProviderStateMixin {
-  final GameService _gameService = GameService();
+  late final GameService _gameService;
   GameTableInfo? _tableInfo;
   bool _isLoading = true;
   String? _errorMessage;
   Timer? _refreshTimer;
   Timer? _autoAdvanceTimer;
   int _phaseTimeRemaining = 0;
+  GameProvider? _gameProvider;
   
   // Animation state for reactions
   final Map<String, AnimationController> _reactionAnimations = {};
@@ -29,18 +33,48 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
   @override
   void initState() {
     super.initState();
+    _gameService = GameService(context);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-    _loadTableInfo();
-      _refreshGameInfo();
+      _loadTableInfo(); // Load table info directly
       _setupReactionCallback();
     });
     _startRefreshTimer();
+    
+    // Add timeout to prevent infinite loading
+    Timer(const Duration(seconds: 10), () {
+      if (mounted && _isLoading) {
+        print('⚠️ Loading timeout reached, setting loading to false');
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Timeout: Could not load game data';
+        });
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _gameProvider = Provider.of<GameProvider>(context, listen: false);
+    _gameProvider?.addListener(_onGameStateChanged);
+  }
+
+  void _onGameStateChanged() {
+    if (mounted) {
+      // If game state becomes available and we're still loading, try to load table info
+      if (_gameProvider?.currentGameState != null && _isLoading) {
+        print('🔄 Game state became available, loading table info');
+        _loadTableInfo();
+      }
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
     _autoAdvanceTimer?.cancel();
+    _gameProvider?.removeListener(_onGameStateChanged);
     // Dispose animation controllers
     for (var controller in _reactionAnimations.values) {
       controller.dispose();
@@ -60,9 +94,15 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
   Future<void> _loadTableInfo() async {
     try {
       print('🔄 Loading table info...');
+      
+      // Try to load table info directly from room-info endpoint
+      try {
       final data = await _gameService.getGameTableInfo();
       print('📊 Raw data: $data');
       print('🔍 Current speaker in data: ${data['current_speaker']}');
+        print('🔍 Table image URL in data: ${data['table_image_url']}');
+        print('🔍 Players in data: ${data['players']}');
+        print('🔍 Scenario name in data: ${data['scenario_name']}');
       
       final tableInfo = GameTableInfo.fromJson(data);
       print('🔍 Current speaker after parsing: ${tableInfo.currentSpeaker?.username}');
@@ -70,7 +110,10 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
       for (var player in tableInfo.players) {
         print('  - ${player.username}: isSpeaking=${player.isSpeaking}');
       }
+        print('🔍 Table image URL after parsing: ${tableInfo.tableImageUrl}');
+        print('🔍 Scenario name after parsing: ${tableInfo.scenarioName}');
       
+        // Use the table info from backend as is (including the image URL)
       if (mounted) {
         setState(() {
           _tableInfo = tableInfo;
@@ -78,9 +121,14 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
           _errorMessage = null;
         });
         print('✅ Table info updated in state');
+          print('📸 Table image URL from backend: ${tableInfo.tableImageUrl}');
         
         // شروع تایمر نوبت صحبت
         _startAutoAdvanceTimer();
+        }
+      } catch (e) {
+        print('❌ Error loading real table info, creating basic table info: $e');
+        await _createBasicTableInfo();
       }
     } catch (e) {
       print('❌ Error loading table info: $e');
@@ -95,22 +143,154 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
     }
   }
 
+  Future<void> _createBasicTableInfo() async {
+    try {
+      print('🔄 Creating basic table info...');
+      
+      final gameProvider = Provider.of<GameProvider>(context, listen: false);
+      final room = gameProvider.currentRoom;
+      
+      if (room == null) {
+        print('❌ No room available for basic table info');
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'No room available';
+          });
+        }
+        return;
+      }
+
+      // Try to get players from API first
+      List<Player> players = gameProvider.currentPlayers;
+      print('🔍 Current players from provider: ${players.length}');
+      
+      // If no players from provider, try to fetch from API
+      if (players.isEmpty) {
+        try {
+          print('🔄 No players in provider, trying to fetch from API...');
+          final result = await _gameService.getLobby(room.id);
+          players = result['players'] as List<Player>;
+          print('🔍 Players from API: ${players.length}');
+          
+          // Update provider with fetched players
+          gameProvider.setCurrentPlayers(players);
+        } catch (e) {
+          print('⚠️ Could not fetch players from API: $e');
+        }
+      }
+      
+      // If still no players, create dummy players
+      if (players.isEmpty) {
+        print('⚠️ Still no players, creating dummy players');
+        players = List.generate(room.currentPlayers, (index) => Player(
+          id: index + 1,
+          userId: index + 1,
+          username: 'Player ${index + 1}',
+          roomId: room.id,
+          isAlive: true,
+          isReady: true,
+          joinedAt: DateTime.now(),
+          votesReceived: 0,
+          isProtected: false,
+          specialActionsUsed: {},
+        ));
+      }
+
+      // Create basic player seats in a circle
+      final playerSeats = <PlayerSeat>[];
+      final playerCount = players.length;
+      
+      for (int i = 0; i < playerCount; i++) {
+        final angle = (i * 360.0 / playerCount) * (3.14159 / 180); // Convert to radians
+        final radius = 0.25; // کاهش شعاع برای اطمینان از قرارگیری در محدوده
+        final x = (0.5 + radius * cos(angle)).clamp(0.1, 0.9); // محدود کردن به محدوده امن
+        final y = (0.5 + radius * sin(angle)).clamp(0.1, 0.9); // محدود کردن به محدوده امن
+        
+        // Debug print برای بررسی موقعیت‌ها
+        print('🎯 Player ${i + 1} (${players[i].username}): angle=${angle.toStringAsFixed(2)}, x=${x.toStringAsFixed(3)}, y=${y.toStringAsFixed(3)}');
+        
+        playerSeats.add(PlayerSeat(
+          id: i + 1,
+          username: players[i].username,
+          role: null, // Room players don't have roles yet
+          isAlive: players[i].isAlive,
+          avatarUrl: null,
+          seatPosition: SeatPosition(
+            x: x,
+            y: y,
+            angle: (i * 360.0 / playerCount),
+          ),
+          isSpeaking: false,
+          reactions: {},
+        ));
+      }
+
+      // Create basic table info without image (will use custom design)
+      final basicTableInfo = GameTableInfo(
+        tableImageUrl: null, // No image, will use custom table design
+        scenarioName: room.scenario?.name ?? 'Basic Game',
+        players: playerSeats,
+        currentSpeaker: null,
+        speakingQueue: SpeakingQueue(
+          spokenPlayers: [],
+          remainingPlayers: players.map((p) => p.username).toList(),
+        ),
+      );
+
+      if (mounted) {
+        setState(() {
+          _tableInfo = basicTableInfo;
+          _isLoading = false;
+          _errorMessage = null;
+        });
+        print('✅ Basic table info created with ${playerSeats.length} players');
+        
+        // شروع تایمر نوبت صحبت
+        _startAutoAdvanceTimer();
+      }
+      
+    } catch (e) {
+      print('❌ Error creating basic table info: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Error creating basic table info: $e';
+        });
+      }
+    }
+  }
+
   Future<void> _refreshGameInfo() async {
     try {
       final gameProvider = Provider.of<GameProvider>(context, listen: false);
       print('🔄 Refreshing game info...');
-      await gameProvider.refreshGameInfo();
       
+      // Try to load table info directly first
+      await _loadTableInfo();
+      
+      // Also try to refresh game info if possible
+      try {
+        await gameProvider.refreshGameInfo();
       final gameState = gameProvider.currentGameState;
       print('📊 Game state after refresh:');
       print('  - phase: ${gameState?.phase}');
       print('  - phaseTimeRemaining: ${gameState?.phaseTimeRemaining}');
       print('  - playerRole: ${gameState?.playerRole}');
+      } catch (e) {
+        print('⚠️ Could not refresh game info: $e');
+      }
       
       // شروع تایمر auto-advance
       _startAutoAdvanceTimer();
     } catch (e) {
       print('❌ Error refreshing game info: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Error refreshing game info: $e';
+        });
+      }
     }
   }
 
@@ -220,6 +400,11 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
   Widget build(BuildContext context) {
     // Check if we have a room first
     final gameProvider = Provider.of<GameProvider>(context, listen: false);
+    print('🔍 GameTableScreen.build: Current room: ${gameProvider.currentRoom}');
+    print('🔍 GameTableScreen.build: Current players: ${gameProvider.currentPlayers.length}');
+    print('🔍 GameTableScreen.build: Loading: $_isLoading');
+    print('🔍 GameTableScreen.build: Error: $_errorMessage');
+    
     if (gameProvider.currentRoom == null) {
       return Scaffold(
         appBar: AppBar(
@@ -227,21 +412,36 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
           backgroundColor: const Color(0xFF1a1a1a),
           foregroundColor: const Color(0xFFFFD700),
         ),
-        body: const Center(
+        body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.info_outline, size: 64, color: Colors.orange),
-              SizedBox(height: 16),
-              Text(
+              const Icon(Icons.info_outline, size: 64, color: Colors.orange),
+              const SizedBox(height: 16),
+              const Text(
                 'اتاق بازی یافت نشد',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              SizedBox(height: 8),
-              Text(
+              const SizedBox(height: 8),
+              const Text(
                 'ابتدا وارد یک اتاق شوید',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pushReplacementNamed(context, '/home');
+                },
+                child: const Text('بازگشت به خانه'),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  // Try to load table info anyway
+                  await _loadTableInfo();
+                },
+                child: const Text('تلاش مجدد'),
               ),
             ],
           ),
@@ -250,9 +450,41 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
     }
 
     if (_isLoading) {
-      return const Scaffold(
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('میز بازی'),
+          backgroundColor: const Color(0xFF1a1a1a),
+          foregroundColor: const Color(0xFFFFD700),
+        ),
         body: Center(
-          child: CircularProgressIndicator(),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFFD700)),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'در حال بارگذاری اطلاعات بازی...',
+                style: TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'اتاق: ${gameProvider.currentRoom?.name ?? 'نامشخص'}',
+                style: const TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _isLoading = false;
+                  });
+                  _refreshGameInfo();
+                },
+                child: const Text('تلاش مجدد'),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -287,9 +519,40 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
     }
 
     if (_tableInfo == null) {
-      return const Scaffold(
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('میز بازی'),
+          backgroundColor: const Color(0xFF1a1a1a),
+          foregroundColor: const Color(0xFFFFD700),
+        ),
         body: Center(
-          child: Text('اطلاعات میز یافت نشد'),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.table_chart, size: 64, color: Colors.orange),
+              const SizedBox(height: 16),
+              const Text(
+                'اطلاعات میز یافت نشد',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'در حال تلاش برای بارگذاری مجدد...',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _isLoading = true;
+                  });
+                  _refreshGameInfo();
+                },
+                child: const Text('تلاش مجدد'),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -298,13 +561,17 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
       builder: (context, gameProvider, child) {
     return Scaffold(
           appBar: _buildAppBar(gameProvider),
-          body: Column(
+          body: SafeArea(
+            child: Column(
             children: [
               _buildStatusBar(gameProvider),
               Expanded(child: _buildTableLayout(gameProvider)),
             ],
           ),
-          bottomNavigationBar: _buildControls(gameProvider),
+          ),
+          bottomNavigationBar: SafeArea(
+            child: _buildControls(gameProvider),
+          ),
         );
       },
     );
@@ -475,20 +742,12 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
     return Container(
       width: double.infinity,
       height: double.infinity,
-      decoration: BoxDecoration(
-        image: _tableInfo!.tableImageUrl != null
-            ? DecorationImage(
-                image: NetworkImage(_tableInfo!.tableImageUrl!),
-                fit: BoxFit.cover,
-                    onError: (exception, stackTrace) {
-                      print('❌ Error loading table image: $exception');
-                    },
-              )
-            : null,
-        color: _tableInfo!.tableImageUrl == null ? Colors.brown[300] : null,
-      ),
       child: Stack(
+        clipBehavior: Clip.none, // اجازه نمایش المان‌های خارج از محدوده
         children: [
+          // Table background
+          _buildTableBackground(),
+          
           // دایره‌های بازیکنان
           ..._tableInfo!.players.map((player) => _buildPlayerSeat(player)),
           
@@ -509,6 +768,116 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
         ],
       ),
     );
+  }
+
+  Widget _buildTableBackground() {
+    if (_tableInfo?.tableImageUrl != null && _tableInfo!.tableImageUrl!.isNotEmpty) {
+      print('🖼️ Attempting to load table image: ${_tableInfo!.tableImageUrl}');
+      
+      return Stack(
+        children: [
+          // Background image
+          Image.network(
+            _tableInfo!.tableImageUrl!,
+            width: double.infinity,
+            height: double.infinity,
+            fit: BoxFit.contain,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'image/*',
+            },
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) {
+                return child;
+              }
+              return Container(
+                color: Colors.brown[300],
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                            : null,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'در حال لود عکس میز...',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+            errorBuilder: (context, error, stackTrace) {
+              print('❌ Error loading table image: $error');
+              print('❌ Image URL: ${_tableInfo!.tableImageUrl}');
+              print('❌ Stack trace: $stackTrace');
+              _tryFallbackImage();
+              
+              // Return custom design as fallback
+              return Container(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.center,
+                    radius: 1.0,
+                    colors: [
+                      Colors.brown[400]!,
+                      Colors.brown[600]!,
+                      Colors.brown[800]!,
+                    ],
+                    stops: const [0.0, 0.7, 1.0],
+                  ),
+                ),
+                child: CustomPaint(
+                  painter: TablePatternPainter(),
+                ),
+              );
+            },
+          ),
+        ],
+      );
+    } else {
+      print('🎨 Using custom table design (no image URL)');
+      // Create a simple table background with gradient
+      return Container(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment.center,
+            radius: 1.0,
+            colors: [
+              Colors.brown[400]!,
+              Colors.brown[600]!,
+              Colors.brown[800]!,
+            ],
+            stops: const [0.0, 0.7, 1.0],
+          ),
+        ),
+        child: CustomPaint(
+          painter: TablePatternPainter(),
+        ),
+      );
+    }
+  }
+
+  void _tryFallbackImage() {
+    if (mounted) {
+      setState(() {
+        // If image fails to load, use custom table design instead
+        if (_tableInfo != null) {
+          _tableInfo = GameTableInfo(
+            tableImageUrl: null, // Remove image URL to use custom design
+            scenarioName: _tableInfo!.scenarioName,
+            players: _tableInfo!.players,
+            currentSpeaker: _tableInfo!.currentSpeaker,
+            speakingQueue: _tableInfo!.speakingQueue,
+          );
+        }
+      });
+    }
   }
 
   Widget _buildPlayerSeat(PlayerSeat player) {
@@ -553,8 +922,8 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
               animation: animationController ?? const AlwaysStoppedAnimation(0.0),
               builder: (context, child) {
                 return Container(
-                  width: 100,
-                  height: 100,
+                  width: 70,
+                  height: 70,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: LinearGradient(
@@ -584,8 +953,8 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
                                 ? ClipOval(
                                     child: Image.network(
                                       player.avatarUrl!,
-                                      width: 75,
-                                      height: 75,
+                                      width: 55,
+                                      height: 55,
                                       fit: BoxFit.cover,
                                       errorBuilder: (context, error, stackTrace) {
                                         return _buildDefaultAvatar(player.username);
@@ -600,8 +969,8 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
                         top: 2,
                         left: 2,
                         child: Container(
-                          width: 28,
-                          height: 28,
+                          width: 22,
+                          height: 22,
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
                               begin: Alignment.topLeft,
@@ -643,8 +1012,8 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
                           top: 2,
                           right: 2,
                           child: Container(
-                            width: 22,
-                            height: 22,
+                            width: 18,
+                            height: 18,
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
                                 begin: Alignment.topLeft,
@@ -675,10 +1044,10 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
             
             // نام کاربری - چسبیده به دایره
             Transform.translate(
-              offset: const Offset(0, -10), // 10 پیکسل بالاتر (5+5)
+              offset: const Offset(0, -5), // 5 پیکسل بالاتر (کمتر از قبل)
               child: Container(
-                width: 100,
-                height: 25,
+                width: 90,
+                height: 22,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -687,10 +1056,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
                         ? [const Color(0xFF8B0000), const Color(0xFF5D0000)]
                         : [const Color(0xFF2C2C2C), const Color(0xFF1a1a1a)],
                   ),
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(8),
-                    bottomRight: Radius.circular(8),
-                  ),
+                  borderRadius: BorderRadius.zero, // حذف لبه‌های گرد
                   border: Border.all(
                     color: player.isSpeaking 
                         ? const Color(0xFFFFD700)
@@ -742,8 +1108,8 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
 
   Widget _buildDefaultAvatar(String username) {
     return Container(
-      width: 75,
-      height: 75,
+      width: 55,
+      height: 55,
       decoration: const BoxDecoration(
         color: Colors.grey,
         shape: BoxShape.circle,
@@ -791,8 +1157,8 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
         child: Opacity(
           opacity: opacity,
           child: Container(
-            width: 75,
-            height: 75,
+            width: 55,
+            height: 55,
             decoration: BoxDecoration(
               color: backgroundColor,
               shape: BoxShape.circle,
@@ -929,7 +1295,87 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
             const SizedBox(height: 8),
             Text('تعداد بازیکنان: ${_tableInfo?.players.length ?? 0}'),
             const SizedBox(height: 8),
-            Text('عکس میز: ${_tableInfo?.tableImageUrl != null ? 'موجود' : 'ناموجود'}'),
+            Text('عکس میز: ${_tableInfo?.tableImageUrl != null ? 'از Backend' : 'طراحی سفارشی'}'),
+            if (_tableInfo?.tableImageUrl != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                'URL: ${_tableInfo!.tableImageUrl}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  // Test image loading
+                  print('🧪 Testing image URL: ${_tableInfo!.tableImageUrl}');
+                  
+                  try {
+                    // Try to validate the URL
+                    final uri = Uri.parse(_tableInfo!.tableImageUrl!);
+                    print('✅ URL is valid: $uri');
+                    print('✅ Scheme: ${uri.scheme}');
+                    print('✅ Host: ${uri.host}');
+                    print('✅ Path: ${uri.path}');
+                    
+                    // Force reload the image
+                    setState(() {
+                      // This will trigger a rebuild and reload the image
+                    });
+                  } catch (e) {
+                    print('❌ Invalid URL: $e');
+                  }
+                },
+                child: const Text('تست لود عکس'),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  // Debug raw API data
+                  print('🔍 Debugging raw API data...');
+                  try {
+                    final data = await _gameService.getGameTableInfo();
+                    print('📊 Raw API Response:');
+                    print('  - Keys: ${data.keys.toList()}');
+                    print('  - Table image URL: ${data['table_image_url']}');
+                    print('  - Players: ${data['players']}');
+                    print('  - Scenario name: ${data['scenario_name']}');
+                    print('  - Current speaker: ${data['current_speaker']}');
+                    print('  - Speaking queue: ${data['speaking_queue']}');
+                    
+                    // Show in dialog
+                    if (mounted) {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Raw API Data'),
+                          content: SingleChildScrollView(
+                            child: Text(
+                              'Keys: ${data.keys.toList()}\n\n'
+                              'Table Image URL: ${data['table_image_url']}\n\n'
+                              'Players: ${data['players']}\n\n'
+                              'Scenario Name: ${data['scenario_name']}\n\n'
+                              'Current Speaker: ${data['current_speaker']}\n\n'
+                              'Speaking Queue: ${data['speaking_queue']}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('بستن'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    print('❌ Error getting raw data: $e');
+                  }
+                },
+                child: const Text('Debug API Data'),
+              ),
+            ],
           ],
         ),
         actions: [
@@ -948,7 +1394,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
     final userRole = gameState?.playerRole;
         
     return Container(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -1023,7 +1469,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
   }) {
     return Container(
       width: isFullWidth ? double.infinity : null,
-      height: 50,
+      height: 44,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -1210,7 +1656,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
         
         return Container(
           width: buttonWidth,
-          height: 55,
+          height: 44,
           margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -1304,7 +1750,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
         
         return Container(
           width: buttonWidth,
-          height: 50,
+          height: 44,
           margin: const EdgeInsets.symmetric(horizontal: 2),
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -1422,9 +1868,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
       print('❌ Error sending night action: $e');
       // نمایش پیام خطا به کاربر
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطا در ارسال اقدام: $e')),
-        );
+        SnackBarHelper.showErrorSnackBar(context, 'خطا در ارسال اقدام: $e');
       }
     }
   }
@@ -1541,12 +1985,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
 
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
+    SnackBarHelper.showErrorSnackBar(context, message);
   }
 
   void _triggerReactionAnimation(String playerUsername, String reactionType) {
@@ -1601,7 +2040,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
             ],
           ),
           content: const Text(
-            'آیا می‌خواهید میز بازی را ریست کنید؟\n\nاین عمل بازی را به حالت اولیه برمی‌گرداند (مثل شروع مجدد بازی) اما شما در همان اتاق باقی می‌مانید.',
+            'آیا می‌خواهید بازی را ریست کنید؟\n\nاین عمل بازی را به حالت لابی برمی‌گرداند (مثل لحظه ورود از لابی به میز) و تمام بازیکنان به حالت آماده نیست برمی‌گردند.',
             textAlign: TextAlign.center,
           ),
           actions: [
@@ -1639,7 +2078,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
               children: [
                 CircularProgressIndicator(),
                 SizedBox(width: 16),
-                Text('در حال ریست کردن میز...'),
+                Text('در حال ریست کردن بازی...'),
               ],
             ),
           );
@@ -1650,26 +2089,18 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
       final gameProvider = Provider.of<GameProvider>(context, listen: false);
       await gameProvider.resetGame();
       
-      // Manual refresh اطلاعات بازی
-      await gameProvider.refreshGameInfo();
-      await _loadTableInfo();
-
       // بستن loading dialog
       if (mounted) {
         Navigator.pop(context);
       }
 
       // نمایش پیام موفقیت
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('میز بازی با موفقیت ریست شد - آماده برای شروع مجدد'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      SnackBarHelper.showSuccessSnackBar(context, 'بازی با موفقیت ریست شد - بازگشت به لابی');
 
-      // به‌روزرسانی اطلاعات
-      _loadTableInfo();
-      _refreshGameInfo();
+      // بازگشت به لابی
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/lobby');
+      }
 
     } catch (e) {
       // بستن loading dialog در صورت خطا
@@ -1678,12 +2109,43 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
       }
 
       // نمایش خطا
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('خطا در ریست کردن میز: $e'),
-          backgroundColor: Colors.red,
-        ),
+      SnackBarHelper.showErrorSnackBar(context, 'خطا در ریست کردن بازی: $e');
+      
+      print('❌ Error resetting game: $e');
+    }
+  }
+}
+
+class TablePatternPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.brown[700]!.withOpacity(0.3)
+      ..strokeWidth = 2.0
+      ..style = PaintingStyle.stroke;
+
+    // Draw table edge
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width * 0.3;
+    
+    canvas.drawCircle(center, radius, paint);
+    
+    // Draw some decorative lines
+    for (int i = 0; i < 8; i++) {
+      final angle = (i * 45) * (3.14159 / 180);
+      final startX = center.dx + radius * cos(angle);
+      final startY = center.dy + radius * sin(angle);
+      final endX = center.dx + (radius + 20) * cos(angle);
+      final endY = center.dy + (radius + 20) * sin(angle);
+      
+      canvas.drawLine(
+        Offset(startX, startY),
+        Offset(endX, endY),
+        paint,
       );
     }
   }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

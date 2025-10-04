@@ -129,7 +129,11 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (ctx) => AuthProvider()),
-        ChangeNotifierProvider(create: (ctx) => GameProvider()),
+        ChangeNotifierProvider(create: (ctx) {
+          final gameProvider = GameProvider();
+          gameProvider.initializeGameService(ctx);
+          return gameProvider;
+        }),
         ChangeNotifierProvider(create: (ctx) => ThemeProvider()),
       ],
       child: Consumer<ThemeProvider>(

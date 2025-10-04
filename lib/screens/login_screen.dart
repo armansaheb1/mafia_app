@@ -30,15 +30,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _usernameController.text,
         _passwordController.text,
       );
-      // اگر ورود موفق بود، به صفحه اصلی هدایت شو
-      // Navigator.of(context).pushReplacementNamed('/home');
-      // فعلاً یک پیام موفقیت نشان می‌دهیم
-      // ignore: use_build_context_synchronously
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ورود موفقیت‌آمیز بود!')),
-      );
-      // ignore: use_build_context_synchronously
-      Navigator.of(context).pushReplacementNamed('/home');
+      // AuthWrapper will automatically handle navigation based on auth state
       if (kDebugMode) {
         print('Login Successful! Token received.');
       }

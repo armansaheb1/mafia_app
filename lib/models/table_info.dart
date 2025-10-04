@@ -50,13 +50,24 @@ class PlayerSeat {
   });
 
   factory PlayerSeat.fromJson(Map<String, dynamic> json) {
+    print('🔍 Parsing PlayerSeat from JSON: $json');
+    
+    // Handle seat position with better fallback
+    SeatPosition seatPosition;
+    if (json['seat_position'] != null && json['seat_position'] is Map) {
+      seatPosition = SeatPosition.fromJson(json['seat_position']);
+    } else {
+      // Create default position if not provided
+      seatPosition = SeatPosition(x: 0.5, y: 0.5, angle: 0.0);
+    }
+    
     return PlayerSeat(
-      id: json['id'],
-      username: json['username'],
+      id: json['id'] ?? 0,
+      username: json['username'] ?? 'Unknown Player',
       role: json['role'],
       isAlive: json['is_alive'] ?? true,
       avatarUrl: json['avatar_url'],
-      seatPosition: SeatPosition.fromJson(json['seat_position'] ?? {}),
+      seatPosition: seatPosition,
       isSpeaking: json['is_speaking'] ?? false,
       reactions: Map<String, int>.from(json['reactions'] ?? {}),
     );
@@ -64,13 +75,24 @@ class PlayerSeat {
   
   // Factory method that takes currentSpeaker into account
   factory PlayerSeat.fromJsonWithSpeaker(Map<String, dynamic> json, String? currentSpeakerUsername) {
+    print('🔍 Parsing PlayerSeat with speaker from JSON: $json');
+    
+    // Handle seat position with better fallback
+    SeatPosition seatPosition;
+    if (json['seat_position'] != null && json['seat_position'] is Map) {
+      seatPosition = SeatPosition.fromJson(json['seat_position']);
+    } else {
+      // Create default position if not provided
+      seatPosition = SeatPosition(x: 0.5, y: 0.5, angle: 0.0);
+    }
+    
     return PlayerSeat(
-      id: json['id'],
-      username: json['username'],
+      id: json['id'] ?? 0,
+      username: json['username'] ?? 'Unknown Player',
       role: json['role'],
       isAlive: json['is_alive'] ?? true,
       avatarUrl: json['avatar_url'],
-      seatPosition: SeatPosition.fromJson(json['seat_position'] ?? {}),
+      seatPosition: seatPosition,
       isSpeaking: json['is_speaking'] ?? (currentSpeakerUsername == json['username']),
       reactions: Map<String, int>.from(json['reactions'] ?? {}),
     );
@@ -106,21 +128,43 @@ class GameTableInfo {
   });
 
   factory GameTableInfo.fromJson(Map<String, dynamic> json) {
+    print('🔍 Parsing GameTableInfo from JSON: $json');
+    
     final currentSpeaker = json['current_speaker'] != null
         ? CurrentSpeaker.fromJson(json['current_speaker'])
         : null;
     
+    // Parse players with better error handling
+    List<PlayerSeat> players = [];
+    if (json['players'] != null && json['players'] is List) {
+      try {
+        players = (json['players'] as List<dynamic>)
+            .map((playerJson) => PlayerSeat.fromJson(playerJson))
+            .toList();
+        print('✅ Successfully parsed ${players.length} players');
+      } catch (e) {
+        print('❌ Error parsing players: $e');
+        print('❌ Players data: ${json['players']}');
+        // Create fallback players
+        players = [];
+      }
+    }
+    
+    // Parse speaking queue with better error handling
+    SpeakingQueue speakingQueue;
+    try {
+      speakingQueue = SpeakingQueue.fromJson(json['speaking_queue'] ?? {});
+    } catch (e) {
+      print('❌ Error parsing speaking queue: $e');
+      speakingQueue = SpeakingQueue(spokenPlayers: [], remainingPlayers: []);
+    }
+    
     return GameTableInfo(
       tableImageUrl: json['table_image_url'],
-      scenarioName: json['scenario_name'] ?? '',
-      players: (json['players'] as List<dynamic>? ?? [])
-          .map((playerJson) => PlayerSeat.fromJsonWithSpeaker(
-                playerJson, 
-                currentSpeaker?.username
-              ))
-          .toList(),
+      scenarioName: json['scenario_name'] ?? 'Unknown Scenario',
+      players: players,
       currentSpeaker: currentSpeaker,
-      speakingQueue: SpeakingQueue.fromJson(json['speaking_queue'] ?? {}),
+      speakingQueue: speakingQueue,
     );
   }
 

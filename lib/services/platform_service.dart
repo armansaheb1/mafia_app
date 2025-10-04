@@ -4,8 +4,8 @@ import 'package:flutter/foundation.dart';
 class PlatformService {
   static String getBaseUrl() {
     if (kDebugMode) {
-      // برای همه پلتفرم‌ها از 10.0.2.2 استفاده کن (Flutter emulator)
-      return 'http://10.0.2.2:8000';
+      // برای همه پلتفرم‌ها از 172.20.10.10 استفاده کن (Flutter emulator)
+      return 'http://172.20.10.10:8000';
     }
     
     // در حالت production، از URL اصلی استفاده کن
@@ -14,8 +14,8 @@ class PlatformService {
   
   static String getWebSocketUrl() {
     if (kDebugMode) {
-      // برای همه پلتفرم‌ها از 10.0.2.2 استفاده کن
-      return 'ws://10.0.2.2:8000';
+      // برای همه پلتفرم‌ها از 172.20.10.10 استفاده کن
+      return 'ws://172.20.10.10:8000';
     }
     
     // در حالت production
@@ -24,8 +24,8 @@ class PlatformService {
   
   static String getMediaUrl() {
     if (kDebugMode) {
-      // برای همه پلتفرم‌ها از 10.0.2.2 استفاده کن
-      return 'http://10.0.2.2:8000';
+      // برای همه پلتفرم‌ها از 172.20.10.10 استفاده کن
+      return 'http://172.20.10.10:8000';
     }
     
     // در حالت production

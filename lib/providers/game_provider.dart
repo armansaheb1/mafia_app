@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,7 +10,7 @@ import '../models/player.dart';
 import '../models/game_state.dart';
 
 class GameProvider with ChangeNotifier {
-  final GameService _gameService = GameService();
+  GameService? _gameService;
   final WebSocketService _webSocketService = WebSocketService();
   
   List<Room> _rooms = [];
@@ -17,6 +18,7 @@ class GameProvider with ChangeNotifier {
   List<Player> _currentPlayers = [];
   bool _isLoading = false;
   String? _errorMessage;
+  Map<String, dynamic>? _gameSettings;
   bool _isWebSocketConnected = false;
   GameState? _currentGameState;
   String? _currentPhase;
@@ -42,6 +44,15 @@ class GameProvider with ChangeNotifier {
   bool get hasVoted => _hasVoted;
   bool get hasNightAction => _hasNightAction;
   List<Map<String, String>> get chatMessages => _chatMessages;
+
+  void initializeGameService(BuildContext context) {
+    _gameService = GameService(context);
+  }
+  
+  GameService get _gameServiceOrThrow {
+    if (_gameService == null) throw Exception('GameService not initialized');
+    return _gameService!;
+  }
 
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
@@ -102,7 +113,7 @@ class GameProvider with ChangeNotifier {
     _setLoading(true);
     try {
       _setErrorMessage(null);
-      final rooms = await _gameService.getRooms();
+      final rooms = await _gameServiceOrThrow.getRooms();
       _setRooms(rooms);
     } catch (e) {
       _setErrorMessage(e.toString());
@@ -116,7 +127,7 @@ class GameProvider with ChangeNotifier {
     _setLoading(true);
     try {
       _setErrorMessage(null);
-      final room = await _gameService.createRoom(name, maxPlayers, isPrivate, password, scenarioId);
+      final room = await _gameServiceOrThrow.createRoom(name, maxPlayers, isPrivate, password, scenarioId);
       _setCurrentRoom(room);
       
       _addPlayer(Player(
@@ -149,7 +160,7 @@ class GameProvider with ChangeNotifier {
         await leaveRoom();
       }
       
-      final result = await _gameService.joinRoom(roomName, password);
+      final result = await _gameServiceOrThrow.joinRoom(roomName, password);
       final room = result['room'] as Room;
       final player = result['player'] as Player;
       
@@ -168,7 +179,7 @@ class GameProvider with ChangeNotifier {
     _setLoading(true);
     try {
       _setErrorMessage(null);
-      final result = await _gameService.getLobby(roomId);
+      final result = await _gameServiceOrThrow.getLobby(roomId);
       _setCurrentRoom(result['room'] as Room);
       _setCurrentPlayers(result['players'] as List<Player>);
     } catch (e) {
@@ -193,8 +204,18 @@ class GameProvider with ChangeNotifier {
           },
           onError: (error) {
             print('❌ WebSocket listener error: $error');
-            _setWebSocketConnected(false);
+            _handleTemporaryDisconnect(); // استفاده از disconnect موقت
             _setErrorMessage('اتصال WebSocket قطع شد: $error');
+            
+            // تلاش برای اتصال مجدد بعد از 3 ثانیه
+            Timer(const Duration(seconds: 3), () {
+              if (_currentRoom != null && !_isWebSocketConnected) {
+                print('🔄 Attempting to reconnect to WebSocket...');
+                connectToWebSocket(_currentRoom!.name).catchError((e) {
+                  print('❌ Reconnection failed: $e');
+                });
+              }
+            });
           },
         );
       } else {
@@ -306,7 +327,7 @@ class GameProvider with ChangeNotifier {
 
   Future<void> sendVote(String targetUsername, {String voteType = 'lynch'}) async {
     try {
-      await _gameService.vote(targetUsername, voteType: voteType);
+      await _gameServiceOrThrow.vote(targetUsername, voteType: voteType);
       _webSocketService.sendMessage('vote', targetUsername);
     } catch (e) {
       _setErrorMessage('خطا در ارسال رای: $e');
@@ -315,7 +336,7 @@ class GameProvider with ChangeNotifier {
 
   Future<void> sendNightAction(String actionType, {String? targetUsername}) async {
     try {
-      await _gameService.nightAction(actionType, targetUsername: targetUsername);
+      await _gameServiceOrThrow.nightAction(actionType, targetUsername: targetUsername);
       _webSocketService.sendMessage('night_action', {
         'action_type': actionType,
         'target': targetUsername,
@@ -329,7 +350,7 @@ class GameProvider with ChangeNotifier {
     if (_currentRoom == null) return;
     
     try {
-      await _gameService.endPhase(_currentRoom!.id);
+      await _gameServiceOrThrow.endPhase(_currentRoom!.id);
       _webSocketService.sendMessage('end_phase', '');
     } catch (e) {
       _setErrorMessage('خطا در پایان فاز: $e');
@@ -341,7 +362,7 @@ class GameProvider with ChangeNotifier {
     
     try {
       _setLoading(true);
-      final result = await _gameService.startGame(_currentRoom!.id);
+      final result = await _gameServiceOrThrow.startGame(_currentRoom!.id);
       
       // Update game state with the response
       if (result.containsKey('game_state')) {
@@ -363,7 +384,7 @@ class GameProvider with ChangeNotifier {
   Future<void> refreshGameInfo() async {
     try {
       print('🔄 GameProvider: Refreshing game info...');
-      final gameInfo = await _gameService.getGameInfo();
+      final gameInfo = await _gameServiceOrThrow.getGameInfo();
       print('📊 GameProvider: Received game info: $gameInfo');
       
       // Debug each field individually
@@ -442,7 +463,7 @@ class GameProvider with ChangeNotifier {
   Future<void> leaveRoom() async {
     try {
       if (_currentRoom != null) {
-        await _gameService.leaveRoom(_currentRoom!.id);
+        await _gameServiceOrThrow.leaveRoom(_currentRoom!.id);
       }
     } catch (e) {
       print('❌ Error in leaveRoom API call: $e');
@@ -470,10 +491,17 @@ class GameProvider with ChangeNotifier {
     _clearSavedGameState();
   }
 
+  // متد برای disconnect موقت (بدون پاک کردن game state)
+  void _handleTemporaryDisconnect() {
+    _stopGameTimer();
+    _setWebSocketConnected(false);
+    // فقط تایمر را متوقف می‌کنیم، game state را پاک نمی‌کنیم
+  }
+
   Future<void> checkActiveGame() async {
     try {
       _setLoading(true);
-      final gameStatus = await _gameService.checkGameStatus();
+      final gameStatus = await _gameServiceOrThrow.checkGameStatus();
       
       if (gameStatus != null) {
         final room = Room.fromJson(gameStatus['room']);
@@ -514,6 +542,11 @@ class GameProvider with ChangeNotifier {
     _currentPlayers = players;
     notifyListeners();
   }
+  
+  // Public method to set current players (for external access)
+  void setCurrentPlayers(List<Player> players) {
+    _setCurrentPlayers(players);
+  }
 
   void _setLoading(bool loading) {
     _isLoading = loading;
@@ -535,10 +568,20 @@ class GameProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // Public method to set game state (for basic game state creation)
+  void setCurrentGameState(GameState? gameState) {
+    _setCurrentGameState(gameState);
+  }
+
   void _setCurrentPhase(String? phase) {
     _currentPhase = phase;
     notifyListeners();
     _saveGameState();
+  }
+
+  // Public method to set phase (for basic game state creation)
+  void setCurrentPhase(String? phase) {
+    _setCurrentPhase(phase);
   }
 
   void _addPlayer(Player player) {
@@ -604,6 +647,7 @@ class GameProvider with ChangeNotifier {
         // Update game state if available
         if (gameData.containsKey('alive_players')) {
           _currentGameState = GameState.fromJson(gameData);
+          notifyListeners();
         }
       }
       
@@ -612,6 +656,9 @@ class GameProvider with ChangeNotifier {
       
       // Refresh game info to get complete game state
       refreshGameInfo();
+      
+      // Notify listeners that game has started (for navigation)
+      notifyListeners();
     } catch (e) {
       print('❌ Error handling game started: $e');
     }
@@ -686,7 +733,7 @@ class GameProvider with ChangeNotifier {
       print('🔄 Calling reset game API...');
       
       // فراخوانی API ریست بازی
-      final response = await _gameService.resetGame();
+      final response = await _gameServiceOrThrow.resetGame();
       print('🔄 Reset API response: $response');
       
       if (response['success'] == true) {

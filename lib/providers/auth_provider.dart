@@ -54,6 +54,7 @@ class AuthProvider with ChangeNotifier {
             if (kDebugMode) {
               print('Token validation successful');
             }
+            notifyListeners();
           } else if (userResponse.statusCode == 401 && refreshToken != null) {
             // Token expired, try to refresh
             try {
@@ -87,6 +88,7 @@ class AuthProvider with ChangeNotifier {
                   if (kDebugMode) {
                     print('Token refreshed successfully');
                   }
+                  notifyListeners();
                 } else {
                   _clearAuthData();
                 }
@@ -126,6 +128,7 @@ class AuthProvider with ChangeNotifier {
   void _clearAuthData() {
     _authData = null;
     _errorMessage = null;
+    notifyListeners();
   }
 
   Future<void> login(String username, String password) async {
