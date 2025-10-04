@@ -229,7 +229,7 @@ class GameService {
       final data = json.decode(response.body);
       // Transform room info to game info format
       return {
-        'phase': data['current_phase'] ?? 'night', // استفاده از فاز واقعی یا شب
+        'phase': data['current_phase'] ?? 'day', // استفاده از فاز واقعی یا روز
         'day_number': data['day_number'] ?? 1,
         'phase_time_remaining': 300,
         'player_role': 'citizen', // Default role

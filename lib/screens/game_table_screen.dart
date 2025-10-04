@@ -86,7 +86,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
     _refreshTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
       if (mounted) {
         _loadTableInfo();
-        _refreshGameInfo();
+        // _refreshGameInfo(); // حذف شده تا فاز از WebSocket حفظ شود
       }
     });
   }
@@ -269,14 +269,22 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
       // Try to load table info directly first
       await _loadTableInfo();
       
-      // Also try to refresh game info if possible
+      // Also try to refresh game info if possible (only if no game state)
       try {
-        await gameProvider.refreshGameInfo();
-      final gameState = gameProvider.currentGameState;
-      print('📊 Game state after refresh:');
-      print('  - phase: ${gameState?.phase}');
-      print('  - phaseTimeRemaining: ${gameState?.phaseTimeRemaining}');
-      print('  - playerRole: ${gameState?.playerRole}');
+        final gameState = gameProvider.currentGameState;
+        if (gameState == null) {
+          await gameProvider.refreshGameInfo();
+          final newGameState = gameProvider.currentGameState;
+          print('📊 Game state after refresh:');
+          print('  - phase: ${newGameState?.phase}');
+          print('  - phaseTimeRemaining: ${newGameState?.phaseTimeRemaining}');
+          print('  - playerRole: ${newGameState?.playerRole}');
+        } else {
+          print('📊 Game state already exists:');
+          print('  - phase: ${gameState.phase}');
+          print('  - phaseTimeRemaining: ${gameState.phaseTimeRemaining}');
+          print('  - playerRole: ${gameState.playerRole}');
+        }
       } catch (e) {
         print('⚠️ Could not refresh game info: $e');
       }
@@ -326,7 +334,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
           if (_phaseTimeRemaining <= 0) {
             timer.cancel();
             print('⏰ Speaking time up! Refreshing game info...');
-            _refreshGameInfo(); // این باعث auto-advance در backend می‌شود
+            // _refreshGameInfo(); // حذف شده تا فاز از WebSocket حفظ شود
             _loadTableInfo(); // همچنین اطلاعات میز را هم به‌روزرسانی کن
           }
         } else {
@@ -353,7 +361,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
           if (_phaseTimeRemaining <= 0) {
             timer.cancel();
             print('🌙 Night action time up! Refreshing game info...');
-            _refreshGameInfo(); // این باعث auto-advance در backend می‌شود
+            // _refreshGameInfo(); // حذف شده تا فاز از WebSocket حفظ شود
             _loadTableInfo(); // همچنین اطلاعات میز را هم به‌روزرسانی کن
           }
         } else {
@@ -479,7 +487,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
                   setState(() {
                     _isLoading = false;
                   });
-                  _refreshGameInfo();
+                  // _refreshGameInfo(); // حذف شده تا فاز از WebSocket حفظ شود
                 },
                 child: const Text('تلاش مجدد'),
               ),
@@ -547,7 +555,7 @@ class _GameTableScreenState extends State<GameTableScreen> with TickerProviderSt
                   setState(() {
                     _isLoading = true;
                   });
-                  _refreshGameInfo();
+                  // _refreshGameInfo(); // حذف شده تا فاز از WebSocket حفظ شود
                 },
                 child: const Text('تلاش مجدد'),
               ),

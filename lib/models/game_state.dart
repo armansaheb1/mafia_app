@@ -23,7 +23,7 @@ class GameState {
     print('🔍 GameState.fromJson: Parsing JSON...');
     
     // Debug each field
-    final phase = json['phase'] ?? 'waiting';
+    final phase = json['phase'] ?? 'night'; // استفاده از شب به جای waiting
     print('  - phase: $phase');
     
     final dayNumberRaw = json['day_number'];

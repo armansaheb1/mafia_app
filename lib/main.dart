@@ -289,7 +289,7 @@ class _AuthWrapperState extends State<AuthWrapper> with WidgetsBindingObserver {
             return const ScenarioSliderScreen();
           } else {
             // بازی هنوز فعال است - رفتن به بازی
-            return const GameScreen();
+            return const GameTableScreen();
           }
         }
 

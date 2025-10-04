@@ -424,7 +424,7 @@ class GameProvider with ChangeNotifier {
     _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_currentRoom?.status == 'in_progress') {
         // فقط برای بررسی نوبت صحبت تایمر داریم
-        refreshGameInfo();
+        // refreshGameInfo(); // حذف شده تا فاز از WebSocket حفظ شود
       } else {
         timer.cancel();
       }
@@ -514,6 +514,16 @@ class GameProvider with ChangeNotifier {
         if (gameState.phase == 'finished') {
           _addChatMessage('سیستم', 'بازی قبلاً به پایان رسیده بود');
           _clearGameState();
+        } else {
+          // اگر بازی فعال است، WebSocket connection برقرار کن
+          print('🎮 Active game found, connecting to WebSocket...');
+          try {
+            await connectToWebSocket(room.name);
+            print('✅ WebSocket connected for active game');
+          } catch (e) {
+            print('⚠️ Could not connect to WebSocket for active game: $e');
+            // ادامه می‌دهیم حتی اگر WebSocket وصل نشود
+          }
         }
       } else {
         _clearGameState();
@@ -645,17 +655,18 @@ class GameProvider with ChangeNotifier {
       if (gameData != null) {
         _setCurrentPhase(gameData['phase']);
         // Update game state if available
-        if (gameData.containsKey('alive_players')) {
-          _currentGameState = GameState.fromJson(gameData);
-          notifyListeners();
+        if (gameData.containsKey('phase')) {
+          _setCurrentGameState(GameState.fromJson(gameData));
         }
       }
       
       // Start game timer
       _startGameTimer();
       
-      // Refresh game info to get complete game state
-      refreshGameInfo();
+      // Only refresh game info if we don't have complete game data from WebSocket
+      if (gameData == null || !gameData.containsKey('phase')) {
+        refreshGameInfo();
+      }
       
       // Notify listeners that game has started (for navigation)
       notifyListeners();
