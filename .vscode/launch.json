@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Mafia App",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "cwd": "/home/ars/Mafia/mafia_app",
+            "env": {
+                "JAVA_HOME": "/home/ars/java",
+                "ANDROID_HOME": "/home/ars/android-sdk",
+                "PATH": "/home/ars/java/bin:/home/ars/android-sdk/platform-tools:/home/ars/flutter/bin:${env:PATH}"
+            }
+        }
+    ]
+}

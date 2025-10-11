@@ -1,0 +1,1 @@
+ /home/ars/Mafia/mafia_app/.dart_tool/flutter_build/bfc5b0860146ec92b93348b2ea731f19/native_assets.yaml: 
